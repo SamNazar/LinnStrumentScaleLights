@@ -223,5 +223,20 @@ class PatcherTest(unittest.TestCase):
         self.assertNotIn("parameters", self.patcher)
 
 
+class ProjectFileTest(unittest.TestCase):
+    def test_maxproj_opens_the_local_patcher(self):
+        root = Path(__file__).resolve().parents[1]
+        project = json.loads((root / "LinnStrumentScaleLights.maxproj").read_text())
+        patcher = project["contents"]["patchers"]["LinnStrumentScaleLights.maxpat"]
+        self.assertEqual(patcher["kind"], "patcher")
+        self.assertEqual(patcher["local"], 1)
+        self.assertEqual(patcher["toplevel"], 1)
+        self.assertTrue((root / "LinnStrumentScaleLights.maxpat").is_file())
+        self.assertEqual(project["autoorganize"], 0)
+        self.assertEqual(project["amxdtype"], 2)
+        self.assertEqual(project["devpathtype"], 1)
+        self.assertEqual(project["devpath"], ".")
+
+
 if __name__ == "__main__":
     unittest.main()
