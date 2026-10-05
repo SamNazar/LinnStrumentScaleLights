@@ -2,7 +2,9 @@
 """Build LinnStrumentScaleLights.maxpat and .amxd without Max.
 
 The .amxd is the container Live 12's Max 9.1 line reads: a 32-byte
-ampf/ptch header followed by the JSON patcher.
+ampf/ptch header followed by the JSON patcher. The type code is mmmm,
+a MIDI effect. aaaa would make Live treat the file as an audio effect
+and leave midiout disconnected from the track's MIDI To.
 """
 
 import json
@@ -201,13 +203,14 @@ def build_engine():
     p.connect(p.vars["t_channel"], 0, p.vars["channel_int"], 1)
     p.connect(p.vars["load_channel"], 0, p.vars["channel_int"], 1)
 
+    # gate: left inlet selects the open outlet (0 closed, 1 open). Right inlet is the message.
     p.obj("gate", 1400, 228, 2, 1, varname="enabled_gate")
     p.message("stop", 560, 228, varname="msg_stop")
     p.obj("sel 0", 400, 228, 2, 2, varname="sel_enabled_off")
     p.obj(f"delay {NRPN_GAP_MS}", 1400, 268, 2, 1, varname="delay_gap")
     p.connect(p.vars["in_5"], 0, p.vars["t_enabled"], 0)
     p.connect(p.vars["t_enabled"], 1, p.vars["sel_enabled_off"], 0)
-    p.connect(p.vars["t_enabled"], 1, p.vars["enabled_gate"], 1)
+    p.connect(p.vars["t_enabled"], 1, p.vars["enabled_gate"], 0)
     p.connect(p.vars["t_enabled"], 0, p.vars["enabled_int"], 1)
     p.connect(p.vars["sel_enabled_off"], 0, p.vars["msg_stop"], 0)
     p.connect(p.vars["msg_stop"], 0, p.vars["delay_gap"], 0)
@@ -287,9 +290,9 @@ def build_engine():
     for i in range(24):
         p.connect(p.vars[f"bit_{i}"], 0, p.vars["pack24"], i)
     p.obj("gate", 24, 820, 2, 1, varname="final_gate")
-    p.connect(p.vars["pack24"], 0, p.vars["final_gate"], 0)
-    p.connect(p.vars["final_gate"], 0, p.vars["enabled_gate"], 0)
-    p.connect(p.vars["mode_off_msg"], 0, p.vars["enabled_gate"], 0)
+    p.connect(p.vars["pack24"], 0, p.vars["final_gate"], 1)
+    p.connect(p.vars["final_gate"], 0, p.vars["enabled_gate"], 1)
+    p.connect(p.vars["mode_off_msg"], 0, p.vars["enabled_gate"], 1)
 
     p.obj("gate", 700, 220, 2, 1, varname="intervals_gate")
     p.obj("append finished", 820, 220, 2, 1, varname="append_end")
@@ -302,7 +305,7 @@ def build_engine():
     p.obj("gate", 1580, 310, 2, 1, varname="pc_gate")
     p.obj("pack 0 1", 1580, 350, 2, 1, varname="pack_main")
     p.obj("route 0 1 2 3 4 5 6 7 8 9 10 11", 1580, 390, 2, 13, varname="route_main")
-    p.connect(p.vars["reg_intervals"], 0, p.vars["intervals_gate"], 0)
+    p.connect(p.vars["reg_intervals"], 0, p.vars["intervals_gate"], 1)
     p.connect(p.vars["intervals_gate"], 0, p.vars["append_end"], 0)
     p.connect(p.vars["append_end"], 0, p.vars["iterator"], 0)
     p.connect(p.vars["iterator"], 0, p.vars["route_end"], 0)
@@ -312,8 +315,8 @@ def build_engine():
     p.connect(p.vars["expr_mod"], 0, p.vars["pc_int"], 0)
     p.connect(p.vars["pc_int"], 0, p.vars["t_pc"], 0)
     p.connect(p.vars["t_pc"], 1, p.vars["not_root"], 0)
-    p.connect(p.vars["not_root"], 0, p.vars["pc_gate"], 1)
-    p.connect(p.vars["t_pc"], 0, p.vars["pc_gate"], 0)
+    p.connect(p.vars["not_root"], 0, p.vars["pc_gate"], 0)
+    p.connect(p.vars["t_pc"], 0, p.vars["pc_gate"], 1)
     p.connect(p.vars["pc_gate"], 0, p.vars["pack_main"], 0)
     p.connect(p.vars["pack_main"], 0, p.vars["route_main"], 0)
     for i in range(12):
@@ -322,10 +325,10 @@ def build_engine():
     # Right-to-left: close the interval gate, open the final gate, read, close.
     p.trigger("0 b 1 0", 820, 820, varname="t_finish")
     p.connect(p.vars["route_end"], 0, p.vars["t_finish"], 0)
-    p.connect(p.vars["t_finish"], 3, p.vars["intervals_gate"], 1)
-    p.connect(p.vars["t_finish"], 2, p.vars["final_gate"], 1)
+    p.connect(p.vars["t_finish"], 3, p.vars["intervals_gate"], 0)
+    p.connect(p.vars["t_finish"], 2, p.vars["final_gate"], 0)
     p.connect(p.vars["t_finish"], 1, p.vars["t_read"], 0)
-    p.connect(p.vars["t_finish"], 0, p.vars["final_gate"], 1)
+    p.connect(p.vars["t_finish"], 0, p.vars["final_gate"], 0)
 
     p.obj("sel 0", 560, 540, 2, 2, varname="sel_len")
     p.trigger("b", 700, 540, varname="t_len_go")
@@ -334,7 +337,7 @@ def build_engine():
     p.connect(p.vars["sel_len"], 0, p.vars["t_finish"], 0)
     p.connect(p.vars["sel_len"], 1, p.vars["t_len_go"], 0)
     p.connect(p.vars["t_len_go"], 0, p.vars["t_iter"], 0)
-    p.connect(p.vars["t_iter"], 1, p.vars["intervals_gate"], 1)
+    p.connect(p.vars["t_iter"], 1, p.vars["intervals_gate"], 0)
     p.connect(p.vars["t_iter"], 0, p.vars["reg_intervals"], 0)
 
     _build_sender(p)
@@ -389,10 +392,10 @@ def _build_sender(p):
 
     p.connect(p.vars["enabled_gate"], 0, p.vars["t_begin"], 0)
     p.connect(p.vars["t_begin"], 3, p.vars["msg_stop"], 0)
-    p.connect(p.vars["t_begin"], 2, p.vars["nth_gate"], 1)
+    p.connect(p.vars["t_begin"], 2, p.vars["nth_gate"], 0)
     p.connect(p.vars["t_begin"], 1, p.vars["reg_values"], 0)
     p.connect(p.vars["t_begin"], 0, p.vars["t_start"], 0)
-    p.connect(p.vars["t_start"], 2, p.vars["nth_gate"], 1)
+    p.connect(p.vars["t_start"], 2, p.vars["nth_gate"], 0)
     p.connect(p.vars["t_start"], 1, p.vars["channel_int"], 0)
     p.connect(p.vars["t_start"], 0, p.vars["msg_zero"], 0)
     p.connect(p.vars["msg_zero"], 0, p.vars["t_index"], 0)
@@ -406,7 +409,7 @@ def _build_sender(p):
     p.connect(p.vars["expr_nth"], 0, p.vars["zl_nth"], 1)
     p.connect(p.vars["t_index"], 1, p.vars["idx_int"], 1)
     p.connect(p.vars["t_index"], 0, p.vars["reg_values"], 0)
-    p.connect(p.vars["reg_values"], 0, p.vars["nth_gate"], 0)
+    p.connect(p.vars["reg_values"], 0, p.vars["nth_gate"], 1)
     p.connect(p.vars["nth_gate"], 0, p.vars["zl_nth"], 0)
     p.connect(p.vars["zl_nth"], 0, p.vars["t_value"], 0)
     p.connect(p.vars["t_value"], 1, p.vars["pack38"], 2)
@@ -431,14 +434,14 @@ def _assert_engine(p):
     p.require("status_trig", 0, "idx_int", 0)
     p.require("expr_lsb", 0, "pack98", 2)
     p.require("t_value", 1, "pack38", 2)
-    p.require("t_finish", 2, "final_gate", 1)
-    p.require("t_finish", 0, "final_gate", 1)
+    p.require("t_finish", 2, "final_gate", 0)
+    p.require("t_finish", 0, "final_gate", 0)
     p.require("t_finish", 1, "t_read", 0)
     p.require("t_mode_on", 2, "t_clear", 0)
     p.require("t_mode_on", 1, "root_int", 0)
     p.require("t_mode_on", 0, "len_int", 0)
-    p.require("mode_off_msg", 0, "enabled_gate", 0)
-    p.require("final_gate", 0, "enabled_gate", 0)
+    p.require("mode_off_msg", 0, "enabled_gate", 1)
+    p.require("final_gate", 0, "enabled_gate", 1)
     p.require("msg_stop", 0, "delay_gap", 0)
     for name in ("pack99", "pack98", "pack6", "pack38", "pack101", "pack100"):
         p.require(name, 0, "out_0", 0)
@@ -608,7 +611,7 @@ def amxd_bytes(json_bytes):
     header = (
         b"ampf"
         + struct.pack("<I", 4)
-        + b"aaaameta"
+        + b"mmmmmeta"
         + struct.pack("<I", 4)
         + struct.pack("<I", 1)
         + b"ptch"

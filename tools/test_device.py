@@ -109,7 +109,8 @@ class PatcherTest(unittest.TestCase):
         blob = amxd_bytes(raw)
         self.assertEqual(len(blob[:32]), 32)
         self.assertTrue(blob.startswith(b"ampf"))
-        self.assertEqual(blob[8:16], b"aaaameta")
+        self.assertEqual(blob[8:12], b"mmmm")
+        self.assertEqual(blob[8:16], b"mmmmmeta")
         self.assertEqual(blob[24:28], b"ptch")
         ptch = blob.index(b"ptch")
         length = struct.unpack_from("<I", blob, ptch + 4)[0]
@@ -218,6 +219,26 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(value["parameter_mmax"], 16.0)
         self.assertEqual(value["parameter_initial"], [1])
         self.assertEqual(numbox["parameter_enable"], 1)
+
+    def test_gate_messages_enter_on_the_right(self):
+        # Max gate: inlet 0 chooses the outlet (0 closed, 1 open). Inlet 1 is the message.
+        eng = by_var(self.engine)
+        data_from = {
+            "enabled_gate": {"final_gate", "mode_off_msg"},
+            "final_gate": {"pack24"},
+            "intervals_gate": {"reg_intervals"},
+            "pc_gate": {"t_pc"},
+            "nth_gate": {"reg_values"},
+        }
+        names = {box["id"]: box.get("varname") for box in boxes(self.engine)}
+        for gate, sources in data_from.items():
+            for src, dst in links(self.engine):
+                if dst[0] != eng[gate]["id"]:
+                    continue
+                if names[src[0]] in sources:
+                    self.assertEqual(dst[1], 1, names[src[0]])
+                else:
+                    self.assertEqual(dst[1], 0, names[src[0]])
 
     def test_no_empty_parameter_banks(self):
         self.assertNotIn("parameters", self.patcher)

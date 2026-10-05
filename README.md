@@ -19,11 +19,11 @@ Colors are whatever Main and Accent are already set to on the split. The device 
 
 `LinnStrumentScaleLights.maxproj` is the Max project for this folder. Open that file in Max on your computer. The patcher is set to open with the project.
 
-In the project window, use **Manage Project → Export as a Max for Live Device**. The project’s device type is MIDI, and its development path is this folder, so the export writes `LinnStrumentScaleLights.amxd` here. In the Project Inspector, that is Development Path Type **relative** and Development Path `.`. Keep Project Folder Organized stays off so Max leaves `LinnStrumentScaleLights.maxpat` where it is.
+The `LinnStrumentScaleLights.amxd` in this folder is already a MIDI effect. Live 12 loads that file directly. Exporting from Max is only needed if you want Max to rewrite the device.
+
+In the project window, **Manage Project → Export as a Max for Live Device** uses device type MIDI and writes `LinnStrumentScaleLights.amxd` here. In the Project Inspector, Development Path Type is **relative** and Development Path is `.`. Keep Project Folder Organized stays off so Max leaves `LinnStrumentScaleLights.maxpat` where it is.
 
 If the inspector shows the development path as disabled, set it back to relative and `.` before exporting. While that setting is disabled, Max writes the device to `~/Documents/Max 8/Max for Live Devices` on Mac, or `Documents\Max 8\Max for Live Devices` on Windows. Max 9 uses the Max 9 folder of the same name.
-
-This environment has no Max application, so the project was not opened here. Export once from your Max before loading the device in Live. That replaces the generated `.amxd` in this folder with a file your Max wrote.
 
 ## Drop it on a track in Live 12
 
@@ -40,7 +40,5 @@ What moves the lights is the scale of the clip selected in Clip View, including 
 
 - `LinnStrumentScaleLights.maxproj` is the project to open in Max.
 - `LinnStrumentScaleLights.maxpat` is the patcher.
-- `LinnStrumentScaleLights.amxd` is the device. The copy in the repo is generated. After you export from the project, this file is the one Max saved.
-- `tools/build_device.py` regenerates the patcher and the generated device. `tools/test_device.py` checks the scale math, the patcher wiring, and the project file.
-
-The generated `.amxd` is a 32-byte `ampf` / `ptch` header plus the JSON patcher, which is the container Max 9.1 (the Max line bundled with current Live 12 releases) reads. It was not opened in Max or Live, and it was not run on a LinnStrument. Exporting from your Max writes the archive form that your Max and Live expect.
+- `LinnStrumentScaleLights.amxd` is the MIDI effect to drop into Live. `tools/build_device.py` regenerates it. The header type is `mmmm`, so Live routes `midiout` to the track's MIDI To.
+- `tools/test_device.py` checks the scale math, the patcher wiring, and the project file.
