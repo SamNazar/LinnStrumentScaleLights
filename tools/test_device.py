@@ -9,7 +9,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_device import amxd_bytes, build_document, dumps
+from build_device import (
+    CYAN_ON,
+    CYAN_ON_INACTIVE,
+    DARK_BG,
+    DARK_BG_INACTIVE,
+    DEVICE_HEIGHT,
+    DIM_TEXT,
+    DIM_TEXT_INACTIVE,
+    INK_TEXT,
+    INK_TEXT_INACTIVE,
+    NOTE_NAMES,
+    YELLOW_ON,
+    YELLOW_ON_INACTIVE,
+    amxd_bytes,
+    build_document,
+    dumps,
+)
 from scale_logic import full_update, masks, nrpn_messages, parameter_number
 
 
@@ -119,7 +135,19 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(json.loads(payload), self.doc)
 
     def test_every_cord_lands_on_a_real_inlet(self):
-        for patcher in (self.patcher, self.engine):
+        parent = by_var(self.patcher)
+        for name in ("engine", "lights", "manual"):
+            sub = parent[name]["patcher"]
+            inlets = [b["index"] for b in boxes(sub) if b["maxclass"] == "inlet"]
+            outlets = [b["index"] for b in boxes(sub) if b["maxclass"] == "outlet"]
+            self.assertEqual(sorted(inlets), list(range(1, parent[name]["numinlets"] + 1)))
+            self.assertEqual(sorted(outlets), list(range(1, parent[name]["numoutlets"] + 1)))
+        for patcher in (
+            self.patcher,
+            self.engine,
+            parent["lights"]["patcher"],
+            parent["manual"]["patcher"],
+        ):
             io = {box["id"]: box for box in boxes(patcher)}
             for src, dst in links(patcher):
                 self.assertIn(src[0], io)
@@ -196,7 +224,13 @@ class PatcherTest(unittest.TestCase):
             )
 
     def test_no_firmware_mode_or_memory_writes(self):
-        for patcher in (self.patcher, self.engine):
+        parent = by_var(self.patcher)
+        for patcher in (
+            self.patcher,
+            self.engine,
+            parent["lights"]["patcher"],
+            parent["manual"]["patcher"],
+        ):
             for box in boxes(patcher):
                 text = box.get("text", "")
                 if box["maxclass"] == "comment":
@@ -224,8 +258,10 @@ class PatcherTest(unittest.TestCase):
         # Max gate: inlet 0 chooses the outlet (0 closed, 1 open). Inlet 1 is the message.
         eng = by_var(self.engine)
         data_from = {
-            "enabled_gate": {"final_gate", "mode_off_msg"},
             "final_gate": {"pack24"},
+            "scale_gate": {"final_gate", "mode_off_msg"},
+            "manual_gate": {"in_7"},
+            "enabled_gate": {"scale_gate", "manual_gate"},
             "intervals_gate": {"reg_intervals"},
             "pc_gate": {"t_pc"},
             "nth_gate": {"reg_values"},
@@ -242,6 +278,137 @@ class PatcherTest(unittest.TestCase):
 
     def test_no_empty_parameter_banks(self):
         self.assertNotIn("parameters", self.patcher)
+
+    def test_parameters_are_channel_follow_and_root(self):
+        visible = {
+            box.get("varname")
+            for box in boxes(self.patcher)
+            if box.get("parameter_enable") == 1
+            and box.get("saved_attribute_attributes", {}).get("valueof", {}).get("parameter_invisible") != 2
+        }
+        self.assertEqual(visible, {"midi_channel", "scale_mark", "root_menu"})
+        follow = by_var(self.patcher)["scale_mark"]["saved_attribute_attributes"]["valueof"]
+        root = by_var(self.patcher)["root_menu"]["saved_attribute_attributes"]["valueof"]
+        self.assertEqual(follow["parameter_longname"], "Follow Scale")
+        self.assertEqual(follow["parameter_initial"], [1])
+        self.assertEqual(root["parameter_longname"], "Root")
+        self.assertEqual(root["parameter_enum"], list(NOTE_NAMES))
+
+    def test_scale_button_follows_and_greys_out_without_a_scale(self):
+        parent = by_var(self.patcher)
+        mark = parent["scale_mark"]
+        self.assertEqual(mark["pictures"], ["scale.svg", "scale.svg"])
+        self.assertEqual(mark["usepicture"], 1)
+        self.assertEqual(mark["mode"], 1)
+        self.assertEqual(mark["rounded"], 0)
+        self.assertEqual(mark["outputmode"], 1)
+        self.assertEqual(parent["grey_scale"]["text"], "active 0")
+        self.assertEqual(parent["arm_scale"]["text"], "active 1")
+        self.assertIn(
+            ([parent["grey_scale"]["id"], 0], [mark["id"], 0]),
+            links(self.patcher),
+        )
+        self.assertIn(
+            ([parent["sel_scale"]["id"], 0], [parent["grey_scale"]["id"], 0]),
+            links(self.patcher),
+        )
+        self.assertEqual(parent["expr_follow"]["text"], "expr $i1 * $i2")
+
+    def test_reset_button_seeds_c_major_only_in_manual_mode(self):
+        parent = by_var(self.patcher)
+        manual = parent["manual"]["id"]
+        reset = parent["reset_scale"]["id"]
+        cords = links(self.patcher)
+        c_major = [str(v) for v in masks(1, 0, [0, 2, 4, 5, 7, 9, 11])]
+        self.assertEqual(parent["reset_mask"]["text"].split(), c_major)
+        self.assertIn(([parent["reset_mask"]["id"], 0], [manual, 0]), cords)
+        self.assertIn(([parent["reset_root"]["id"], 0], [manual, 1]), cords)
+        self.assertEqual(parent["reset_root"]["text"], "0")
+        for name in ("block_clicks", "show_clicks", "grey_reset", "arm_reset"):
+            self.assertIn(([parent[name]["id"], 0], [reset, 0]), cords)
+        self.assertIn(([parent["sel_follow"]["id"], 1], [parent["grey_reset"]["id"], 0]), cords)
+        self.assertIn(([parent["sel_follow"]["id"], 0], [parent["arm_reset"]["id"], 0]), cords)
+
+    def test_presentation_fits_the_live_device_height(self):
+        for box in boxes(self.patcher):
+            if not box.get("presentation"):
+                continue
+            x, y, w, h = box["presentation_rect"]
+            for value in (x, y, w, h):
+                self.assertEqual(value, int(value))
+            self.assertLessEqual(y + h, DEVICE_HEIGHT)
+            if box["maxclass"] == "live.text":
+                self.assertEqual(box["rounded"], 0)
+
+    def test_note_grid_is_the_linnstrument_global_page(self):
+        parent = by_var(self.patcher)
+        rows = {}
+        for pc in range(12):
+            pad = parent[f"pad_{pc}"]
+            self.assertEqual(pad["text"], NOTE_NAMES[pc])
+            self.assertEqual(pad["texton"], NOTE_NAMES[pc])
+            self.assertEqual(pad["parameter_enable"], 1)
+            self.assertEqual(pad["saved_attribute_attributes"]["valueof"]["parameter_invisible"], 2)
+            self.assertEqual(pad["mode"], 1)
+            self.assertEqual(pad["appearance"], 0)
+            self.assertEqual(pad["activetextoncolor"], [0.0, 0.0, 0.0, 1.0])
+            self.assertNotIn("hint", pad)
+            x, y, _w, _h = pad["presentation_rect"]
+            rows.setdefault(y, []).append((x, pc))
+        ordered = [ [pc for _x, pc in sorted(rows[y])] for y in sorted(rows) ]
+        self.assertEqual(ordered, [
+            [9, 10, 11],
+            [6, 7, 8],
+            [3, 4, 5],
+            [0, 1, 2],
+        ])
+        columns = {}
+        for pc in range(12):
+            x = parent[f"pad_{pc}"]["presentation_rect"][0]
+            columns.setdefault(x, []).append(pc)
+        self.assertEqual(
+            [sorted(columns[x]) for x in sorted(columns)],
+            [[0, 3, 6, 9], [1, 4, 7, 10], [2, 5, 8, 11]],
+        )
+
+    def test_pad_colors_follow_the_same_mask_as_the_nrpns(self):
+        parent = by_var(self.patcher)
+        eng = by_var(self.engine)
+        light_vars = by_var(parent["lights"]["patcher"])
+        mask_sources = {
+            src[0]
+            for src, dst in links(self.engine)
+            if dst == [eng["out_1"]["id"], 0]
+        }
+        self.assertEqual(
+            mask_sources,
+            {eng["scale_gate"]["id"], eng["manual_gate"]["id"]},
+        )
+        self.assertIn(
+            ([parent["manual"]["id"], 0], [parent["engine"]["id"], 7]),
+            links(self.patcher),
+        )
+        for pc in range(12):
+            self.assertEqual(light_vars[f"state_{pc}"]["text"], "expr $i2 * 2 + $i1")
+            self.assertEqual(light_vars[f"bg_0_{pc}"]["text"], DARK_BG)
+            self.assertEqual(light_vars[f"bgi_0_{pc}"]["text"], DARK_BG_INACTIVE)
+            self.assertEqual(light_vars[f"bg_1_{pc}"]["text"], YELLOW_ON)
+            self.assertEqual(light_vars[f"bgi_1_{pc}"]["text"], YELLOW_ON_INACTIVE)
+            self.assertEqual(light_vars[f"bg_2_{pc}"]["text"], CYAN_ON)
+            self.assertEqual(light_vars[f"bgi_2_{pc}"]["text"], CYAN_ON_INACTIVE)
+            self.assertEqual(light_vars[f"fg_0_{pc}"]["text"], DIM_TEXT)
+            self.assertEqual(light_vars[f"fgi_0_{pc}"]["text"], DIM_TEXT_INACTIVE)
+            self.assertEqual(light_vars[f"fg_1_{pc}"]["text"], INK_TEXT)
+            self.assertEqual(light_vars[f"fgi_1_{pc}"]["text"], INK_TEXT_INACTIVE)
+            self.assertEqual(light_vars[f"fg_2_{pc}"]["text"], INK_TEXT)
+            self.assertEqual(light_vars[f"fgi_2_{pc}"]["text"], INK_TEXT_INACTIVE)
+            self.assertEqual(light_vars[f"val_0_{pc}"]["text"], "set 0")
+            self.assertEqual(light_vars[f"val_1_{pc}"]["text"], "set 1")
+            self.assertEqual(light_vars[f"val_2_{pc}"]["text"], "set 1")
+            self.assertIn(
+                ([parent["lights"]["id"], pc], [parent[f"pad_{pc}"]["id"], 0]),
+                links(self.patcher),
+            )
 
 
 class ProjectFileTest(unittest.TestCase):

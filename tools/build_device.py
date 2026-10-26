@@ -27,6 +27,60 @@ APPVERSION = {
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
+# LinnStrument global page, top row first. Bottom row is C, C#, D.
+# Live's device view is 169 pixels tall, so the grid and the controls share that.
+DEVICE_HEIGHT = 169
+GRID_ROWS = ((9, 10, 11), (6, 7, 8), (3, 4, 5), (0, 1, 2))
+GRID_ORIGIN = (4, 6)
+CELL_SIZE = (46, 36)
+CELL_GAP = 4
+UI_FONT = "Ableton Sans"
+
+# Off uses the dark LCD background. On uses Control On (the device on/off yellow)
+# or Control On Variant 2 (cyan). Text on those light fills is black, not the LCD grey.
+# Both active* and inactive bg/text attributes are set because non-parameter live.text
+# boxes in Live can render with bgoncolor/bgcolor/textcolor/textoffcolor.
+DARK_RGBA = "0.156863 0.156863 0.156863 1."
+YELLOW_RGBA = "1. 0.709804 0.196078 1."
+CYAN_RGBA = "0. 0.933333 1. 1."
+DIM_TEXT_RGBA = "0.807843 0.807843 0.807843 1."
+INK_TEXT_RGBA = "0. 0. 0. 1."
+
+DARK_BG = f"activebgcolor {DARK_RGBA}"
+DARK_BG_INACTIVE = f"bgcolor {DARK_RGBA}"
+YELLOW_ON = f"activebgoncolor {YELLOW_RGBA}"
+YELLOW_ON_INACTIVE = f"bgoncolor {YELLOW_RGBA}"
+CYAN_ON = f"activebgoncolor {CYAN_RGBA}"
+CYAN_ON_INACTIVE = f"bgoncolor {CYAN_RGBA}"
+DIM_TEXT = f"activetextcolor {DIM_TEXT_RGBA}"
+DIM_TEXT_INACTIVE = f"textoffcolor {DIM_TEXT_RGBA}"
+INK_TEXT = f"activetextoncolor {INK_TEXT_RGBA}"
+INK_TEXT_INACTIVE = f"textcolor {INK_TEXT_RGBA}"
+
+PAD_STEPS = (
+    (DARK_BG, DARK_BG_INACTIVE, DIM_TEXT, DIM_TEXT_INACTIVE, "set 0"),
+    (YELLOW_ON, YELLOW_ON_INACTIVE, INK_TEXT, INK_TEXT_INACTIVE, "set 1"),
+    (CYAN_ON, CYAN_ON_INACTIVE, INK_TEXT, INK_TEXT_INACTIVE, "set 1"),
+)
+THEME_COLORS = (
+    ("live_lcd_bg", "set_bg_off", "activebgcolor", "bg_0"),
+    ("live_lcd_bg", "set_bgi_off", "bgcolor", "bgi_0"),
+    ("live_control_selection", "set_bg_yellow", "activebgoncolor", "bg_1"),
+    ("live_control_selection", "set_bgi_yellow", "bgoncolor", "bgi_1"),
+    ("live_control_selection_alt", "set_bg_cyan", "activebgoncolor", "bg_2"),
+    ("live_control_selection_alt", "set_bgi_cyan", "bgoncolor", "bgi_2"),
+    ("live_lcd_title", "set_fg_off", "activetextcolor", "fg_0"),
+    ("live_lcd_title", "set_fgi_off", "textoffcolor", "fgi_0"),
+)
+SCALE_PURPLE = [0.745098, 0.596078, 1.0, 1.0]
+DEFAULT_MANUAL_MASK = " ".join(str(v) for v in masks(1, 0, [0, 2, 4, 5, 7, 9, 11]))
+
+
+def _grid_size():
+    width = 3 * CELL_SIZE[0] + 2 * CELL_GAP
+    height = 4 * CELL_SIZE[1] + 3 * CELL_GAP
+    return width, height
+
 
 class Patch:
     def __init__(self):
@@ -138,15 +192,16 @@ def build_engine():
     p = Patch()
 
     def inlet(index, comment, y):
+        # Max subpatcher inlet/outlet "index" is 1-based (1..N).
         return p.box(
-            "inlet", None, nin=0, nout=1, index=index, comment=comment,
+            "inlet", None, nin=0, nout=1, index=index + 1, comment=comment,
             patching_rect=[24.0, float(y), 110.0, 22.0],
             varname=f"in_{index}",
         )
 
     def outlet(index, comment, x, y):
         return p.box(
-            "outlet", None, nin=1, nout=0, outlettype=[], index=index, comment=comment,
+            "outlet", None, nin=1, nout=0, outlettype=[], index=index + 1, comment=comment,
             patching_rect=[float(x), float(y), 100.0, 22.0],
             varname=f"out_{index}",
         )
@@ -157,8 +212,10 @@ def build_engine():
     inlet(3, "scale_intervals", 148)
     inlet(4, "MIDI channel", 188)
     inlet(5, "device enabled", 228)
+    inlet(6, "follow Live scale", 268)
+    inlet(7, "manual light mask", 308)
     outlet(0, "MIDI bytes", 1680, 28)
-    outlet(1, "status line", 1680, 68)
+    outlet(1, "Main C-B then Accent C-B", 1680, 68)
 
     mode_int = "mode_int"
     root_int = "root_int"
@@ -233,18 +290,6 @@ def build_engine():
     p.trigger("b b", 900, 320, varname="t_build")
     p.obj("expr (($i1 % 12) + 12) % 12", 400, 320, 1, 1, varname="expr_root")
     p.obj("int", 660, 320, 2, 1, varname="root_pc")
-    p.obj("route 0 1 2 3 4 5 6 7 8 9 10 11", 660, 360, 2, 13, varname="route_root")
-    for i, name in enumerate(NOTE_NAMES):
-        msg = p.message(name, 660 + (i % 6) * 50, 420 + (i // 6) * 26, varname=f"note_{i}")
-        p.connect(p.vars["route_root"], i, msg, 0)
-    p.message("on", 400, 490, varname="msg_on")
-    p.message("off", 460, 490, varname="msg_off")
-    p.obj('sprintf "set Scale mode %s | root %s"', 980, 490, 2, 1, varname="sprintf_status")
-    for i in range(12):
-        p.connect(p.vars[f"note_{i}"], 0, p.vars["sprintf_status"], 1)
-    p.connect(p.vars["msg_on"], 0, p.vars["sprintf_status"], 0)
-    p.connect(p.vars["msg_off"], 0, p.vars["sprintf_status"], 0)
-    p.connect(p.vars["sprintf_status"], 0, p.vars["out_1"], 0)
 
     p.obj("+ 0", 820, 360, 2, 1, varname="plus_root")
     p.obj("!= 0", 900, 360, 2, 1, varname="not_root")
@@ -252,7 +297,6 @@ def build_engine():
     p.obj("route 0 1 2 3 4 5 6 7 8 9 10 11", 980, 410, 2, 13, varname="route_accent")
     p.connect(p.vars["root_int"], 0, p.vars["expr_root"], 0)
     p.connect(p.vars["expr_root"], 0, p.vars["root_pc"], 0)
-    p.connect(p.vars["root_pc"], 0, p.vars["route_root"], 0)
     p.connect(p.vars["root_pc"], 0, p.vars["plus_root"], 1)
     p.connect(p.vars["root_pc"], 0, p.vars["not_root"], 1)
     p.connect(p.vars["root_pc"], 0, p.vars["pack_accent"], 0)
@@ -267,9 +311,7 @@ def build_engine():
     p.trigger("b b b", 400, 540, varname="t_mode_on")
     p.connect(p.vars["t_build"], 0, p.vars["mode_int"], 0)
     p.connect(p.vars["mode_int"], 0, p.vars["sel_mode"], 0)
-    p.connect(p.vars["sel_mode"], 0, p.vars["msg_off"], 0)
     p.connect(p.vars["sel_mode"], 0, p.vars["mode_off_msg"], 0)
-    p.connect(p.vars["sel_mode"], 1, p.vars["msg_on"], 0)
     p.connect(p.vars["sel_mode"], 1, p.vars["t_mode_on"], 0)
 
     for i in range(24):
@@ -291,8 +333,25 @@ def build_engine():
         p.connect(p.vars[f"bit_{i}"], 0, p.vars["pack24"], i)
     p.obj("gate", 24, 820, 2, 1, varname="final_gate")
     p.connect(p.vars["pack24"], 0, p.vars["final_gate"], 1)
-    p.connect(p.vars["final_gate"], 0, p.vars["enabled_gate"], 1)
-    p.connect(p.vars["mode_off_msg"], 0, p.vars["enabled_gate"], 1)
+    # follow 1 sends the Live scale. follow 0 sends the clicked manual mask.
+    p.obj("int", 250, 268, 2, 1, varname="follow_int")
+    p.obj("expr 1 - $i1", 360, 268, 1, 1, varname="expr_manual")
+    p.obj("sel 1", 480, 268, 2, 2, varname="sel_follow_on")
+    p.obj("gate", 24, 860, 2, 1, varname="scale_gate")
+    p.obj("gate", 24, 900, 2, 1, varname="manual_gate")
+    p.connect(p.vars["in_6"], 0, p.vars["follow_int"], 0)
+    p.connect(p.vars["follow_int"], 0, p.vars["scale_gate"], 0)
+    p.connect(p.vars["follow_int"], 0, p.vars["expr_manual"], 0)
+    p.connect(p.vars["follow_int"], 0, p.vars["sel_follow_on"], 0)
+    p.connect(p.vars["sel_follow_on"], 0, p.vars["delay_debounce"], 0)
+    p.connect(p.vars["expr_manual"], 0, p.vars["manual_gate"], 0)
+    p.connect(p.vars["final_gate"], 0, p.vars["scale_gate"], 1)
+    p.connect(p.vars["mode_off_msg"], 0, p.vars["scale_gate"], 1)
+    p.connect(p.vars["in_7"], 0, p.vars["manual_gate"], 1)
+    p.connect(p.vars["scale_gate"], 0, p.vars["enabled_gate"], 1)
+    p.connect(p.vars["manual_gate"], 0, p.vars["enabled_gate"], 1)
+    p.connect(p.vars["scale_gate"], 0, p.vars["out_1"], 0)
+    p.connect(p.vars["manual_gate"], 0, p.vars["out_1"], 0)
 
     p.obj("gate", 700, 220, 2, 1, varname="intervals_gate")
     p.obj("append finished", 820, 220, 2, 1, varname="append_end")
@@ -342,8 +401,9 @@ def build_engine():
 
     _build_sender(p)
     p.comment(
-        "Scale mode on: Accent for the root, Main for every other pitch class in scale_intervals, both off otherwise. "
-        "Scale mode off: Main on for all 12, Accent off. NRPN 203+index. "
+        "Follow on and scale mode on: Accent for the root, Main for every other pitch class in scale_intervals, both off otherwise. "
+        "Follow off: the manual mask is Accent for the chosen root when that note is lit, Main for every other lit note. "
+        "NRPN 203+index. "
         "Each NRPN is CC 99=1, CC 98=parameter-128, CC 6=0, CC 38=0 or 1, CC 101=127, CC 100=127, then a short gap. "
         "scale_name is not an input to this math.",
         24, 1280, 1100, 52,
@@ -440,8 +500,15 @@ def _assert_engine(p):
     p.require("t_mode_on", 2, "t_clear", 0)
     p.require("t_mode_on", 1, "root_int", 0)
     p.require("t_mode_on", 0, "len_int", 0)
-    p.require("mode_off_msg", 0, "enabled_gate", 1)
-    p.require("final_gate", 0, "enabled_gate", 1)
+    p.require("mode_off_msg", 0, "scale_gate", 1)
+    p.require("final_gate", 0, "scale_gate", 1)
+    p.require("in_7", 0, "manual_gate", 1)
+    p.require("follow_int", 0, "scale_gate", 0)
+    p.require("expr_manual", 0, "manual_gate", 0)
+    p.require("scale_gate", 0, "enabled_gate", 1)
+    p.require("manual_gate", 0, "enabled_gate", 1)
+    p.require("scale_gate", 0, "out_1", 0)
+    p.require("manual_gate", 0, "out_1", 0)
     p.require("msg_stop", 0, "delay_gap", 0)
     for name in ("pack99", "pack98", "pack6", "pack38", "pack101", "pack100"):
         p.require(name, 0, "out_0", 0)
@@ -453,6 +520,501 @@ def _assert_engine(p):
             continue
         if banned in blob:
             raise AssertionError(f"engine text contains {banned}")
+
+
+def build_lights():
+    """Paint the 12 cells from one Main-then-Accent list.
+
+    State is accent*2 + main: 0 dark, 1 yellow (Main), 2 cyan (root).
+    Each message is its own box: active/inactive fill, active/inactive text, then `set 0` or `set 1`.
+    """
+    p = Patch()
+    p.box(
+        "inlet", None, nin=0, nout=1, index=1,
+        comment="24 ints, Main C-B then Accent C-B",
+        patching_rect=[24.0, 28.0, 220.0, 22.0],
+        varname="in_mask",
+    )
+    p.obj("zl.reg", 24, 70, 2, 1, varname="mask_reg")
+    p.obj(f"loadmess {DEFAULT_MANUAL_MASK}", 260, 28, 0, 1, varname="load_mask")
+    p.obj("unpack " + " ".join(["i"] * 24), 24, 110, 24, 24, varname="unpack_mask")
+    p.connect(p.vars["load_mask"], 0, p.vars["mask_reg"], 1)
+    p.connect(p.vars["in_mask"], 0, p.vars["mask_reg"], 1)
+    p.connect(p.vars["in_mask"], 0, p.vars["mask_reg"], 0)
+    p.connect(p.vars["mask_reg"], 0, p.vars["unpack_mask"], 0)
+
+    for pc in range(12):
+        x = 24 + (pc % 6) * 240
+        y = 180 + (pc // 6) * 320
+        p.obj("expr $i2 * 2 + $i1", x, y, 2, 1, varname=f"state_{pc}")
+        p.obj("sel 0 1 2", x, y + 28, 2, 4, varname=f"sel_{pc}")
+        p.connect(p.vars["unpack_mask"], pc, p.vars[f"state_{pc}"], 0)
+        p.connect(p.vars["unpack_mask"], 12 + pc, p.vars[f"state_{pc}"], 1)
+        p.connect(p.vars[f"state_{pc}"], 0, p.vars[f"sel_{pc}"], 0)
+        p.box(
+            "outlet", None, nin=1, nout=0, outlettype=[], index=pc + 1,
+            varname=f"pad_out_{pc}",
+            patching_rect=[1540.0, 40.0 + pc * 24.0, 70.0, 22.0],
+        )
+        for state, (bg_text, bgi_text, fg_text, fgi_text, val_text) in enumerate(PAD_STEPS):
+            sy = y + 28 + state * 90
+            trig = p.trigger("b b b b b", x + 76, sy, varname=f"t_{state}_{pc}")
+            bg = p.message(bg_text, x + 76, sy + 20, varname=f"bg_{state}_{pc}")
+            bgi = p.message(bgi_text, x + 76, sy + 40, varname=f"bgi_{state}_{pc}")
+            fg = p.message(fg_text, x + 76, sy + 60, varname=f"fg_{state}_{pc}")
+            fgi = p.message(fgi_text, x + 150, sy + 40, varname=f"fgi_{state}_{pc}")
+            val = p.message(val_text, x + 150, sy + 20, varname=f"val_{state}_{pc}")
+            p.connect(p.vars[f"sel_{pc}"], state, trig, 0)
+            # Set the colors first, then flip the button between 0 and 1.
+            p.connect(trig, 4, bg, 0)
+            p.connect(trig, 3, bgi, 0)
+            p.connect(trig, 2, fg, 0)
+            p.connect(trig, 1, fgi, 0)
+            p.connect(trig, 0, val, 0)
+            for msg in (bg, bgi, fg, fgi, val):
+                p.connect(msg, 0, p.vars[f"pad_out_{pc}"], 0)
+
+    p.obj("live.colors", 24, 860, 1, 2, outlettype=["", "bang"], varname="colors")
+    p.obj("loadbang", 24, 820, 0, 1, varname="load_colors")
+    color_ids = list(dict.fromkeys(color_id for color_id, *_rest in THEME_COLORS))
+    p.trigger(" ".join(["b"] * len(color_ids)), 24, 900, varname="t_query")
+    p.trigger("b", 700, 900, varname="t_repaint")
+    p.connect(p.vars["load_colors"], 0, p.vars["t_query"], 0)
+    p.connect(p.vars["colors"], 1, p.vars["t_query"], 0)
+    p.obj(
+        "route " + " ".join(color_ids),
+        180, 860, 2, len(color_ids) + 1, varname="route_colors",
+    )
+    p.connect(p.vars["colors"], 0, p.vars["route_colors"], 0)
+    for idx, color_id in enumerate(color_ids):
+        query = p.message(color_id, 180 + idx * 170, 820, varname=f"query_{idx}")
+        p.connect(p.vars["t_query"], len(color_ids) - 1 - idx, query, 0)
+        p.connect(query, 0, p.vars["colors"], 0)
+    for step_idx, (color_id, setter, attr, prefix) in enumerate(THEME_COLORS):
+        outlet = color_ids.index(color_id)
+        p.obj(f"prepend set {attr}", 180, 940 + step_idx * 26, 1, 1, varname=setter)
+        p.connect(p.vars["route_colors"], outlet, p.vars[setter], 0)
+        p.connect(p.vars["route_colors"], outlet, p.vars["t_repaint"], 0)
+        for pc in range(12):
+            p.connect(p.vars[setter], 0, p.vars[f"{prefix}_{pc}"], 0)
+    p.connect(p.vars["t_repaint"], 0, p.vars["mask_reg"], 0)
+
+    p.comment(
+        "0 dark, 1 yellow (Control On, the device on/off button), 2 cyan for the root. "
+        "On-text is black. live.colors updates the RGBA messages when the theme changes.",
+        24, 1180, 640, 36,
+    )
+    _assert_lights(p)
+    return p
+
+
+def _assert_lights(p):
+    p.require("in_mask", 0, "mask_reg", 1)
+    p.require("in_mask", 0, "mask_reg", 0)
+    p.require("mask_reg", 0, "unpack_mask", 0)
+    p.require("t_repaint", 0, "mask_reg", 0)
+    for pc in range(12):
+        p.require("unpack_mask", pc, f"state_{pc}", 0)
+        p.require("unpack_mask", 12 + pc, f"state_{pc}", 1)
+        p.require(f"state_{pc}", 0, f"sel_{pc}", 0)
+        for state in range(3):
+            p.require(f"sel_{pc}", state, f"t_{state}_{pc}", 0)
+            p.require(f"t_{state}_{pc}", 4, f"bg_{state}_{pc}", 0)
+            p.require(f"t_{state}_{pc}", 3, f"bgi_{state}_{pc}", 0)
+            p.require(f"t_{state}_{pc}", 2, f"fg_{state}_{pc}", 0)
+            p.require(f"t_{state}_{pc}", 1, f"fgi_{state}_{pc}", 0)
+            p.require(f"t_{state}_{pc}", 0, f"val_{state}_{pc}", 0)
+            for prefix in ("bg", "bgi", "fg", "fgi", "val"):
+                p.require(f"{prefix}_{state}_{pc}", 0, f"pad_out_{pc}", 0)
+
+
+def build_manual():
+    """Lit bits plus a root. Outlet is Main C-B then Accent C-B.
+
+    Inlet 0 stores a mask and does not send. Inlet 1 sets the root and sends.
+    Inlet 2 is a click, `pc value`. Inlet 3 bangs the current mask out.
+    """
+    p = Patch()
+
+    def inlet(index, comment, y):
+        return p.box(
+            "inlet", None, nin=0, nout=1, index=index + 1, comment=comment,
+            patching_rect=[24.0, float(y), 150.0, 22.0],
+            varname=f"in_{index}",
+        )
+
+    inlet(0, "seed mask, no send", 24)
+    inlet(1, "root pitch class", 56)
+    inlet(2, "click: pc value", 88)
+    inlet(3, "bang sends the mask", 120)
+    p.box(
+        "outlet", None, nin=1, nout=0, outlettype=[], index=1,
+        comment="manual mask",
+        patching_rect=[980.0, 24.0, 90.0, 22.0],
+        varname="out_mask",
+    )
+    p.obj("unpack " + " ".join(["i"] * 24), 24, 170, 24, 24, varname="unpack_seed")
+    p.obj(f"loadmess {DEFAULT_MANUAL_MASK}", 24, 145, 0, 1, varname="load_seed")
+    p.obj("int", 24, 220, 2, 1, varname="root_int")
+    p.obj("loadmess 0", 24, 250, 0, 1, varname="load_root")
+    p.trigger("b i", 180, 56, varname="t_root")
+    p.trigger(" ".join(["b"] * 12), 180, 120, varname="t_flush")
+    p.trigger(" ".join(["i"] * 12), 180, 220, varname="t_fan_root")
+    p.obj("route " + " ".join(str(i) for i in range(12)), 180, 88, 2, 13, varname="route_click")
+    p.connect(p.vars["in_0"], 0, p.vars["unpack_seed"], 0)
+    p.connect(p.vars["load_seed"], 0, p.vars["unpack_seed"], 0)
+    p.connect(p.vars["load_root"], 0, p.vars["root_int"], 0)
+    p.connect(p.vars["in_1"], 0, p.vars["t_root"], 0)
+    # trigger fires the right outlet first: store the root, then send.
+    p.connect(p.vars["t_root"], 1, p.vars["root_int"], 0)
+    p.connect(p.vars["t_root"], 0, p.vars["t_flush"], 0)
+    p.connect(p.vars["root_int"], 0, p.vars["t_fan_root"], 0)
+    p.connect(p.vars["in_3"], 0, p.vars["t_flush"], 0)
+    p.connect(p.vars["in_2"], 0, p.vars["route_click"], 0)
+
+    p.obj("pack " + " ".join(["i"] * 24), 700, 420, 24, 1, varname="pack_mask")
+    p.connect(p.vars["pack_mask"], 0, p.vars["out_mask"], 0)
+    default_bits = {0, 2, 4, 5, 7, 9, 11}
+    for pc in range(12):
+        init_bit = 1 if pc in default_bits else 0
+        p.obj("expr $i1 || $i2", 24 + pc * 70, 300, 2, 1, varname=f"lit_{pc}")
+        p.obj(f"int {init_bit}", 24 + pc * 70, 340, 2, 1, varname=f"bit_{pc}")
+        p.obj(f"== {pc}", 24 + pc * 70, 370, 2, 1, varname=f"isroot_{pc}")
+        p.obj("expr $i1 * (1 - $i2)", 24 + pc * 70, 400, 2, 1, varname=f"main_{pc}")
+        p.obj("expr $i1 * $i2", 24 + pc * 70, 430, 2, 1, varname=f"accent_{pc}")
+        p.trigger("b i", 400, 88 + pc * 16, varname=f"t_click_{pc}")
+        p.connect(p.vars["unpack_seed"], pc, p.vars[f"lit_{pc}"], 0)
+        p.connect(p.vars["unpack_seed"], 12 + pc, p.vars[f"lit_{pc}"], 1)
+        p.connect(p.vars[f"lit_{pc}"], 0, p.vars[f"bit_{pc}"], 1)
+        p.connect(p.vars["route_click"], pc, p.vars[f"t_click_{pc}"], 0)
+        p.connect(p.vars[f"t_click_{pc}"], 1, p.vars[f"bit_{pc}"], 1)
+        p.connect(p.vars[f"t_click_{pc}"], 0, p.vars["t_flush"], 0)
+        # Outlet 11 fires first: B down to C, so C (inlet 0 of pack) fires last.
+        p.connect(p.vars["t_flush"], pc, p.vars[f"bit_{pc}"], 0)
+        p.connect(p.vars["t_fan_root"], pc, p.vars[f"isroot_{pc}"], 0)
+        p.connect(p.vars[f"isroot_{pc}"], 0, p.vars[f"main_{pc}"], 1)
+        p.connect(p.vars[f"isroot_{pc}"], 0, p.vars[f"accent_{pc}"], 1)
+        # Accent lands in the pack before Main, so the hot left inlet sees every inlet.
+        p.connect(p.vars[f"bit_{pc}"], 0, p.vars[f"accent_{pc}"], 0)
+        p.connect(p.vars[f"bit_{pc}"], 0, p.vars[f"main_{pc}"], 0)
+        p.connect(p.vars[f"main_{pc}"], 0, p.vars["pack_mask"], pc)
+        p.connect(p.vars[f"accent_{pc}"], 0, p.vars["pack_mask"], 12 + pc)
+
+    p.comment(
+        "A lit root is Accent and not Main. Every other lit note is Main. "
+        "Seed stores bits on the right inlet of int, so it does not send.",
+        24, 480, 640, 32,
+    )
+    _assert_manual(p)
+    return p
+
+
+def _assert_manual(p):
+    p.require("in_0", 0, "unpack_seed", 0)
+    p.require("t_root", 1, "root_int", 0)
+    p.require("t_root", 0, "t_flush", 0)
+    p.require("in_3", 0, "t_flush", 0)
+    p.require("pack_mask", 0, "out_mask", 0)
+    for pc in range(12):
+        p.require("unpack_seed", pc, f"lit_{pc}", 0)
+        p.require("unpack_seed", 12 + pc, f"lit_{pc}", 1)
+        p.require(f"lit_{pc}", 0, f"bit_{pc}", 1)
+        p.require(f"t_click_{pc}", 1, f"bit_{pc}", 1)
+        p.require(f"t_click_{pc}", 0, "t_flush", 0)
+        p.require("t_flush", pc, f"bit_{pc}", 0)
+        p.require(f"bit_{pc}", 0, f"accent_{pc}", 0)
+        p.require(f"bit_{pc}", 0, f"main_{pc}", 0)
+        p.require(f"main_{pc}", 0, "pack_mask", pc)
+        p.require(f"accent_{pc}", 0, "pack_mask", 12 + pc)
+
+
+def _add_note_grid(p, lights):
+    """3 columns by 4 rows. Bottom row is C C# D, top row is A A# B."""
+    cell_w, cell_h = CELL_SIZE
+    gap = CELL_GAP
+    origin_x, origin_y = GRID_ORIGIN
+    fixed_colors = {
+        attr: {"expression": ""}
+        for attr in (
+            "activebgcolor",
+            "activebgoncolor",
+            "activetextcolor",
+            "activetextoncolor",
+            "bgcolor",
+            "bgoncolor",
+            "textcolor",
+            "textoffcolor",
+        )
+    }
+    for row, pcs in enumerate(GRID_ROWS):
+        for col, pc in enumerate(pcs):
+            name = NOTE_NAMES[pc]
+            pad_attrs = dict(fixed_colors)
+            pad_attrs["valueof"] = {
+                "parameter_longname": f"Note {name}",
+                "parameter_shortname": name,
+                "parameter_type": 2,
+                "parameter_enum": ["Off", "On"],
+                "parameter_mmin": 0.0,
+                "parameter_mmax": 1.0,
+                "parameter_invisible": 2,
+                "parameter_modmode": 0,
+            }
+            p.box(
+                "live.text", name, nin=1, nout=2, outlettype=["", ""], varname=f"pad_{pc}",
+                texton=name, mode=1, outputmode=1, appearance=0, border=0, rounded=0,
+                parameter_enable=1, presentation=1, fontsize=12.0, fontname=UI_FONT,
+                activebgcolor=[0.156863, 0.156863, 0.156863, 1.0],
+                bgcolor=[0.156863, 0.156863, 0.156863, 1.0],
+                activetextcolor=[0.807843, 0.807843, 0.807843, 1.0],
+                textoffcolor=[0.807843, 0.807843, 0.807843, 1.0],
+                activebgoncolor=[1.0, 0.709804, 0.196078, 1.0],
+                bgoncolor=[1.0, 0.709804, 0.196078, 1.0],
+                activetextoncolor=[0.0, 0.0, 0.0, 1.0],
+                textcolor=[0.0, 0.0, 0.0, 1.0],
+                saved_attribute_attributes=pad_attrs,
+                patching_rect=[700.0, 220.0 + pc * 26.0, 48.0, 22.0],
+                presentation_rect=[
+                    origin_x + col * (cell_w + gap),
+                    origin_y + row * (cell_h + gap),
+                    cell_w,
+                    cell_h,
+                ],
+            )
+            p.connect(lights, pc, p.vars[f"pad_{pc}"], 0)
+
+
+def _add_device_panel(p, lights, engine, manual):
+    """Presentation fits in Live's fixed 169-pixel device height."""
+    _add_note_grid(p, lights)
+    grid_w, grid_h = _grid_size()
+    origin_x, origin_y = GRID_ORIGIN
+    if origin_y + grid_h > DEVICE_HEIGHT:
+        raise AssertionError("grid is taller than a Live device")
+    right = origin_x + grid_w + 8
+
+    def label(text, x, y, w, h, varname=None):
+        return p.comment(
+            text, 900, y, w, h, varname=varname, presentation=1,
+            fontname=UI_FONT, fontsize=11.0,
+            presentation_rect=[x, y, w, h],
+        )
+
+    p.box(
+        "live.text", "Scale", nin=1, nout=1, varname="scale_mark",
+        texton="Scale", mode=1, outputmode=1, appearance=2, border=0, rounded=0,
+        parameter_enable=1, presentation=1, fontname=UI_FONT,
+        pictures=["scale.svg", "scale.svg"], usepicture=1, remapsvgcolors=1,
+        lcdcolor=SCALE_PURPLE,
+        hint="Follow the selected Live scale. Greyed out when Live has no scale selected.",
+        patching_rect=[900.0, 28.0, 16.0, 16.0],
+        presentation_rect=[right, 6, 16, 16],
+        saved_attribute_attributes={
+            "valueof": {
+                "parameter_longname": "Follow Scale",
+                "parameter_shortname": "Scale",
+                "parameter_type": 2,
+                "parameter_enum": ["Off", "On"],
+                "parameter_mmin": 0.0,
+                "parameter_mmax": 1.0,
+                "parameter_initial": [1],
+                "parameter_initial_enable": 1,
+                "parameter_modmode": 0,
+                "parameter_annotation_name": "Follow Scale",
+                "parameter_info": (
+                    "Follow the scale of the selected clip. "
+                    "Off lets you toggle notes and choose the root."
+                ),
+            }
+        },
+    )
+    label("Scale Lights", right + 20, 6, 148, 16)
+    label("Root", right, 30, 36, 14)
+    p.box(
+        "live.menu", None, nin=1, nout=3, outlettype=["", "", "float"],
+        varname="root_menu", parameter_enable=1, presentation=1,
+        fontname=UI_FONT, fontsize=11.0,
+        hint="Cyan note. Matches Live while follow is on.",
+        patching_rect=[980.0, 70.0, 80.0, 16.0],
+        presentation_rect=[right + 40, 28, 80, 16],
+        saved_attribute_attributes={
+            "valueof": {
+                "parameter_longname": "Root",
+                "parameter_shortname": "Root",
+                "parameter_type": 2,
+                "parameter_enum": list(NOTE_NAMES),
+                "parameter_mmin": 0.0,
+                "parameter_mmax": 11.0,
+                "parameter_initial": [0],
+                "parameter_initial_enable": 1,
+                "parameter_modmode": 0,
+                "parameter_annotation_name": "Root",
+                "parameter_info": (
+                    "Pitch class shown in cyan. Follows Live's root while scale follow is on."
+                ),
+            }
+        },
+    )
+    label("Ch", right, 52, 28, 14)
+    p.box(
+        "live.numbox", "1", nin=1, nout=2, outlettype=["", "float"],
+        varname="midi_channel", parameter_enable=1, presentation=1,
+        fontname=UI_FONT, fontsize=11.0,
+        hint="Main channel of the split you are lighting. Left split defaults to 1, right split to 16.",
+        patching_rect=[980.0, 100.0, 40.0, 16.0],
+        presentation_rect=[right + 40, 50, 40, 16],
+        saved_attribute_attributes={
+            "valueof": {
+                "parameter_longname": "MIDI Channel",
+                "parameter_shortname": "Channel",
+                "parameter_type": 1,
+                "parameter_mmin": 1.0,
+                "parameter_mmax": 16.0,
+                "parameter_initial": [1],
+                "parameter_initial_enable": 1,
+                "parameter_unitstyle": 0,
+            }
+        },
+    )
+    p.box(
+        "live.text", "Resend", nin=1, nout=1, varname="resend",
+        mode=0, border=1, rounded=0, parameter_enable=0, presentation=1,
+        fontname=UI_FONT, fontsize=11.0,
+        hint="Read the current Live scale again and send all 24 light NRPNs.",
+        patching_rect=[1040.0, 96.0, 68.0, 18.0],
+        presentation_rect=[right, 74, 68, 18],
+    )
+    p.box(
+        "live.text", "Reset", nin=1, nout=1, varname="reset_scale",
+        mode=0, border=1, rounded=0, parameter_enable=0, presentation=1,
+        fontname=UI_FONT, fontsize=11.0,
+        hint="Reset the lit notes to C major. Only available when Follow Scale is off.",
+        patching_rect=[1120.0, 96.0, 68.0, 18.0],
+        presentation_rect=[right + 74, 74, 68, 18],
+    )
+    label("MIDI To: LinnStrument", right, 98, 168, 14)
+    label("Scale name", right, 118, 168, 16, varname="name_comment")
+
+    for pc in range(12):
+        pre = p.obj(f"prepend {pc}", 700, 300 + pc * 18, 1, 1, varname=f"click_{pc}")
+        p.connect(p.vars[f"pad_{pc}"], 0, pre, 0)
+        p.connect(pre, 0, manual, 2)
+
+    # scale_mode 0 greys the follow button and forces manual editing.
+    p.obj("int", 400, 520, 2, 1, varname="scale_mode_int")
+    p.obj("int", 400, 560, 2, 1, varname="button_int")
+    p.obj("expr $i1 * $i2", 520, 540, 2, 1, varname="expr_follow")
+    p.trigger("i i i i", 520, 564, varname="t_follow_fan")
+    p.obj("expr 1 - $i1", 640, 540, 1, 1, varname="expr_edit")
+    p.obj("change -1", 520, 592, 2, 1, varname="follow_change")
+    p.trigger("b i", 400, 600, varname="t_button")
+    p.trigger("i i", 520, 620, varname="t_follow")
+    p.obj("sel 0 1", 400, 660, 2, 3, varname="sel_scale")
+    p.obj("sel 0 1", 520, 660, 2, 3, varname="sel_follow")
+    p.obj("loadmess 1", 400, 640, 0, 1, varname="load_follow")
+    p.message("active 0", 400, 700, varname="grey_scale")
+    p.message("active 1", 400, 730, varname="arm_scale")
+    p.message("ignoreclick 0", 640, 700, varname="show_clicks")
+    p.message("ignoreclick 1", 640, 730, varname="block_clicks")
+    p.obj("expr (($i1 % 12) + 12) % 12", 800, 520, 1, 1, varname="expr_live_root")
+    p.obj("int", 800, 560, 2, 1, varname="live_root_int")
+    p.obj("gate", 900, 520, 2, 1, varname="assign_gate")
+    p.obj("gate", 900, 560, 2, 1, varname="live_root_gate")
+    p.obj("gate", 900, 600, 2, 1, varname="menu_gate")
+    p.obj("gate", 900, 640, 2, 1, varname="once_gate")
+    p.obj("prepend assign", 1040, 520, 1, 1, varname="prepend_assign")
+    p.trigger("b b b", 800, 660, varname="t_enter_manual")
+    p.message("1", 760, 700, varname="open_once")
+    p.message("0", 760, 730, varname="close_once")
+
+    p.connect(p.vars["def_0"], 0, p.vars["scale_mode_int"], 0)
+    p.connect(p.vars["scale_mode_int"], 0, p.vars["expr_follow"], 0)
+    p.connect(p.vars["scale_mode_int"], 0, p.vars["sel_scale"], 0)
+    p.connect(p.vars["sel_scale"], 0, p.vars["grey_scale"], 0)
+    p.connect(p.vars["sel_scale"], 1, p.vars["arm_scale"], 0)
+    p.connect(p.vars["grey_scale"], 0, p.vars["scale_mark"], 0)
+    p.connect(p.vars["arm_scale"], 0, p.vars["scale_mark"], 0)
+    p.connect(p.vars["load_follow"], 0, p.vars["t_button"], 0)
+    p.connect(p.vars["scale_mark"], 0, p.vars["t_button"], 0)
+    p.connect(p.vars["t_button"], 1, p.vars["button_int"], 0)
+    p.connect(p.vars["button_int"], 0, p.vars["expr_follow"], 1)
+    p.connect(p.vars["t_button"], 0, p.vars["scale_mode_int"], 0)
+    # Arm the root gates before firing follow_change side effects.
+    p.connect(p.vars["expr_follow"], 0, p.vars["t_follow_fan"], 0)
+    p.connect(p.vars["t_follow_fan"], 3, p.vars["expr_edit"], 0)
+    p.connect(p.vars["t_follow_fan"], 2, p.vars["assign_gate"], 0)
+    p.connect(p.vars["t_follow_fan"], 1, p.vars["live_root_gate"], 0)
+    p.connect(p.vars["expr_edit"], 0, p.vars["menu_gate"], 0)
+    p.connect(p.vars["t_follow_fan"], 0, p.vars["follow_change"], 0)
+    p.connect(p.vars["follow_change"], 0, p.vars["t_follow"], 0)
+    # Set the engine's follow flag before the enter/leave side effects.
+    p.connect(p.vars["t_follow"], 1, engine, 6)
+    p.connect(p.vars["t_follow"], 0, p.vars["sel_follow"], 0)
+    p.connect(p.vars["sel_follow"], 1, p.vars["block_clicks"], 0)
+    p.connect(p.vars["sel_follow"], 1, p.vars["t_reread"], 0)
+    p.connect(p.vars["sel_follow"], 1, p.vars["live_root_int"], 0)
+    p.connect(p.vars["sel_follow"], 0, p.vars["show_clicks"], 0)
+    p.connect(p.vars["sel_follow"], 0, p.vars["t_enter_manual"], 0)
+    for pc in range(12):
+        p.connect(p.vars["block_clicks"], 0, p.vars[f"pad_{pc}"], 0)
+        p.connect(p.vars["show_clicks"], 0, p.vars[f"pad_{pc}"], 0)
+    # Right outlet first: open the one-shot gate, push the root into the menu, close it.
+    p.connect(p.vars["t_enter_manual"], 2, p.vars["open_once"], 0)
+    p.connect(p.vars["open_once"], 0, p.vars["once_gate"], 0)
+    p.connect(p.vars["t_enter_manual"], 1, p.vars["live_root_int"], 0)
+    p.connect(p.vars["t_enter_manual"], 0, p.vars["close_once"], 0)
+    p.connect(p.vars["close_once"], 0, p.vars["once_gate"], 0)
+    p.connect(p.vars["def_1"], 0, p.vars["expr_live_root"], 0)
+    p.connect(p.vars["expr_live_root"], 0, p.vars["live_root_int"], 0)
+    p.connect(p.vars["live_root_int"], 0, p.vars["assign_gate"], 1)
+    p.connect(p.vars["live_root_int"], 0, p.vars["live_root_gate"], 1)
+    p.connect(p.vars["live_root_int"], 0, p.vars["once_gate"], 1)
+    p.connect(p.vars["assign_gate"], 0, p.vars["prepend_assign"], 0)
+    p.connect(p.vars["prepend_assign"], 0, p.vars["root_menu"], 0)
+    p.connect(p.vars["once_gate"], 0, p.vars["root_menu"], 0)
+    p.connect(p.vars["root_menu"], 0, p.vars["menu_gate"], 1)
+    p.connect(p.vars["menu_gate"], 0, manual, 1)
+    p.connect(p.vars["live_root_gate"], 0, manual, 1)
+
+    p.trigger("b b b", 1120, 640, varname="t_reset")
+    p.message(DEFAULT_MANUAL_MASK, 1240, 680, varname="reset_mask")
+    p.message("set 0", 1180, 700, varname="reset_menu")
+    p.message("0", 1120, 720, varname="reset_root")
+    p.message("active 0", 1120, 760, varname="grey_reset")
+    p.message("active 1", 1200, 760, varname="arm_reset")
+    p.connect(p.vars["reset_scale"], 0, p.vars["t_reset"], 0)
+    # Seed the bits silently, then the root inlet flushes the whole mask once.
+    p.connect(p.vars["t_reset"], 2, p.vars["reset_mask"], 0)
+    p.connect(p.vars["reset_mask"], 0, manual, 0)
+    p.connect(p.vars["t_reset"], 1, p.vars["reset_menu"], 0)
+    p.connect(p.vars["reset_menu"], 0, p.vars["root_menu"], 0)
+    p.connect(p.vars["t_reset"], 0, p.vars["reset_root"], 0)
+    p.connect(p.vars["reset_root"], 0, manual, 1)
+    p.connect(p.vars["block_clicks"], 0, p.vars["reset_scale"], 0)
+    p.connect(p.vars["show_clicks"], 0, p.vars["reset_scale"], 0)
+    p.connect(p.vars["sel_follow"], 1, p.vars["grey_reset"], 0)
+    p.connect(p.vars["sel_follow"], 0, p.vars["arm_reset"], 0)
+    p.connect(p.vars["grey_reset"], 0, p.vars["reset_scale"], 0)
+    p.connect(p.vars["arm_reset"], 0, p.vars["reset_scale"], 0)
+
+    p.require("expr_follow", 0, "t_follow_fan", 0)
+    p.require("t_follow_fan", 0, "follow_change", 0)
+    p.require("t_follow", 1, "engine", 6)
+    p.require("sel_scale", 0, "grey_scale", 0)
+    p.require("grey_scale", 0, "scale_mark", 0)
+    p.require("menu_gate", 0, "manual", 1)
+    p.require("live_root_gate", 0, "manual", 1)
+    p.require("reset_mask", 0, "manual", 0)
+    p.require("reset_root", 0, "manual", 1)
+    p.require("block_clicks", 0, "reset_scale", 0)
+    bottom = max(
+        box["presentation_rect"][1] + box["presentation_rect"][3]
+        for wrapped in p.boxes
+        for box in [wrapped["box"]]
+        if box.get("presentation")
+    )
+    if bottom > DEVICE_HEIGHT:
+        raise AssertionError(f"presentation ends at {bottom}, Live devices are {DEVICE_HEIGHT}")
 
 
 def build_parent(engine_patcher):
@@ -493,7 +1055,7 @@ def build_parent(engine_patcher):
     p.connect(p.vars["path_set"], 0, p.vars["t_ids"], 0)
 
     engine = p.box(
-        "newobj", "p engine", nin=6, nout=2, varname="engine",
+        "newobj", "p engine", nin=8, nout=2, varname="engine",
         patching_rect=[40.0, 460.0, 72.0, 22.0],
         patcher=engine_patcher,
     )
@@ -507,62 +1069,28 @@ def build_parent(engine_patcher):
     p.obj("midiin", 280, 520, 1, 1, varname="midi_in")
     p.connect(engine, 0, p.vars["midi_out"], 0)
 
+    lights = p.box(
+        "newobj", "p lights", nin=1, nout=12, varname="lights",
+        patching_rect=[160.0, 460.0, 64.0, 22.0],
+        patcher=build_lights().as_dict([40.0, 40.0, 1700.0, 700.0], presentation=False),
+    )
+    manual = p.box(
+        "newobj", "p manual", nin=4, nout=1, varname="manual",
+        patching_rect=[250.0, 460.0, 70.0, 22.0],
+        patcher=build_manual().as_dict([40.0, 40.0, 1200.0, 560.0], presentation=False),
+    )
+    p.connect(engine, 1, lights, 0)
+    p.connect(engine, 1, manual, 0)
+    p.connect(manual, 0, engine, 7)
+
     p.obj("prepend set", 420, 380, 2, 1, varname="prepend_name")
     p.connect(p.vars["def_2"], 0, p.vars["prepend_name"], 0)
+    _add_device_panel(p, lights, engine, manual)
 
-    title = p.comment(
-        "LinnStrument Scale Lights", 700, 28, 240, 22,
-        fontface=1, fontsize=13.0, presentation=1,
-        presentation_rect=[16.0, 8.0, 250.0, 20.0],
-    )
-    p.comment(
-        "Channel", 700, 58, 56, 20, presentation=1,
-        presentation_rect=[16.0, 36.0, 54.0, 18.0],
-    )
-    p.box(
-        "live.numbox", "1", nin=1, nout=2, outlettype=["", "float"],
-        varname="midi_channel", parameter_enable=1, presentation=1,
-        hint="Main channel of the split you are lighting. Left split defaults to 1, right split to 16.",
-        patching_rect=[770.0, 56.0, 52.0, 18.0],
-        presentation_rect=[74.0, 34.0, 48.0, 18.0],
-        saved_attribute_attributes={
-            "valueof": {
-                "parameter_longname": "MIDI Channel",
-                "parameter_shortname": "Channel",
-                "parameter_type": 1,
-                "parameter_mmin": 1.0,
-                "parameter_mmax": 16.0,
-                "parameter_initial": [1],
-                "parameter_initial_enable": 1,
-                "parameter_unitstyle": 0,
-            }
-        },
-    )
-    p.box(
-        "live.text", "Resend", nin=1, nout=1, varname="resend",
-        mode=0, border=1, parameter_enable=0, presentation=1,
-        hint="Read the current Live scale again and send all 24 light NRPNs.",
-        patching_rect=[840.0, 52.0, 72.0, 22.0],
-        presentation_rect=[136.0, 32.0, 72.0, 22.0],
-    )
-    p.comment(
-        "MIDI To: LinnStrument", 700, 86, 180, 20, presentation=1,
-        presentation_rect=[220.0, 36.0, 250.0, 18.0],
-    )
-    p.comment(
-        "Waiting for the Live scale", 700, 112, 420, 20,
-        varname="status_comment", presentation=1,
-        presentation_rect=[16.0, 62.0, 460.0, 18.0],
-    )
-    p.comment(
-        "Scale name", 700, 138, 420, 20,
-        varname="name_comment", presentation=1,
-        presentation_rect=[16.0, 84.0, 460.0, 18.0],
-    )
     p.connect(p.vars["midi_channel"], 0, engine, 4)
     p.connect(p.vars["t_init"], 0, p.vars["midi_channel"], 0)
     p.connect(p.vars["resend"], 0, p.vars["t_reread"], 0)
-    p.connect(engine, 1, p.vars["status_comment"], 0)
+    p.connect(p.vars["resend"], 0, manual, 3)
     p.connect(p.vars["prepend_name"], 0, p.vars["name_comment"], 0)
 
     p.comment(
@@ -573,9 +1101,6 @@ def build_parent(engine_patcher):
         "Pitch-class presets only: custom memories A, A#, and B ignore Main and Accent NRPNs 203 through 226.",
         40, 580, 860, 72,
     )
-    # title is created so the presentation has a name; keep the id used.
-    _ = title
-
     p.require("path_set", 0, "t_ids", 0)
     p.require("path_view", 0, "obs_clip", 1)
     p.require("t_ids", 0, "obs_mode", 1)
@@ -589,6 +1114,12 @@ def build_parent(engine_patcher):
     p.require("t_reread", 2, "obs_name", 0)
     p.require("t_reread", 3, "obs_intervals", 0)
     p.require("engine", 0, "midi_out", 0)
+    p.require("engine", 1, "lights", 0)
+    for pc in range(12):
+        p.require("lights", pc, f"pad_{pc}", 0)
+        p.require(f"click_{pc}", 0, "manual", 2)
+    p.require("manual", 0, "engine", 7)
+    p.require("engine", 1, "manual", 0)
     p.require("def_0", 0, "engine", 0)
     p.require("def_1", 0, "engine", 1)
     p.require("def_2", 0, "engine", 2)

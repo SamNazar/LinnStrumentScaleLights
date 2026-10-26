@@ -6,8 +6,13 @@ It watches the current scale chooser (`live_set` `scale_mode`, `root_note`, `sca
 
 Pitch class is `(root_note + interval) mod 12`, using `scale_intervals` only. `scale_name` is shown on the device and is not used for the math.
 
-- Scale Mode on: Accent on for the root, Main on for the other scale degrees, both off for every other pitch class.
-- Scale Mode off: all 12 Main pitch classes on, all 12 Accent pitch classes off.
+The panel is 169 pixels tall, the fixed height of a Live device. It shows the same 12 pitch classes as the LinnStrument global settings page: three columns, four rows, bottom row C C# D and top row A A# B. Unlit notes are dark. Scale notes use Live's device-on yellow with black text. The root is cyan, also with black text. The scale button is Ableton's `scale.svg` glyph.
+
+- Follow Scale on, and Live has a scale selected: the grid and the root menu follow that scale. The note buttons are not editable.
+- Follow Scale on, but Live has no scale selected: the button is greyed out and the notes can be edited.
+- Follow Scale off: click a note to turn its light on or off, and choose which lit note is cyan with the Root menu.
+
+While following a scale, Scale Mode on lights the root as Accent and the other scale degrees as Main. Scale Mode off is not a selected scale, so the device does not force every Main light on. A manual pattern sends the same NRPN rules: the cyan note is Accent, every other lit note is Main, and dark notes are off.
 
 Main is NRPN 203–214 for C through B. Accent is NRPN 215–226 for C through B. Each NRPN is CC 99 = 1, CC 98 = parameter − 128, CC 6 = 0, CC 38 = 0 or 1, then the reset CC 101 = 127 and CC 100 = 127. The device sends all 24, with 5 ms between them. It does not change Live’s scale, does not enable User Firmware mode, and does not store or clear custom light memories.
 
