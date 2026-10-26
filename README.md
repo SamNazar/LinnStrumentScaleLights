@@ -47,3 +47,7 @@ What moves the lights is the scale of the clip selected in Clip View, including 
 - `LinnStrumentScaleLights.maxpat` is the patcher.
 - `LinnStrumentScaleLights.amxd` is the MIDI effect to drop into Live. `tools/build_device.py` regenerates it. The header type is `mmmm`, so Live routes `midiout` to the track's MIDI To.
 - `tools/test_device.py` checks the scale math, the patcher wiring, and the project file.
+
+## License
+
+GNU General Public License v3.0 or later. See `LICENSE`.
