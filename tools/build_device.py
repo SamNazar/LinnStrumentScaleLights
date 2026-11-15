@@ -69,13 +69,21 @@ def text_for(rgb):
     return DARK_TEXT if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 else LIGHT_TEXT
 
 
-# Left split settings (NRPN number, label, firmware default, lowest colour number allowed).
+# Colour settings: key, left split NRPN (the right split is +100), label, left and right firmware
+# defaults, lowest colour number allowed.
 COLOR_SETTINGS = (
-    ("main", 30, "Main", 3, 1),
-    ("accent", 31, "Accent", 4, 1),
-    ("played", 32, "Played", 1, 0),
-    ("lowrow", 33, "Low Row", 2, 1),
+    ("main", 30, "Main", 3, 5, 1),
+    ("accent", 31, "Accent", 4, 4, 1),
+    ("played", 32, "Played", 1, 6, 0),
+    ("lowrow", 33, "Low Row", 2, 2, 1),
 )
+RIGHT_SPLIT = 100
+# NRPN 201 is the split selected on the LinnStrument. With split off, that split's colours cover the surface.
+SPLIT_NRPN = 201
+QUERY_PARAMS = (SPLIT_NRPN,) + tuple(
+    number + offset for offset in (0, RIGHT_SPLIT) for _key, number, *_rest in COLOR_SETTINGS
+)
+POLL_MS = 2000
 QUERY_NRPN = 299
 # Swatch order: red, orange, yellow, lime, green, cyan, blue, magenta, pink, then white, black and off.
 RAINBOW_ORDER = (1, 9, 2, 10, 3, 4, 5, 6, 11, 8, 7, 0)
@@ -552,20 +560,28 @@ def _build_sender(p):
     p.connect(p.vars["expr_status"], 0, p.vars["nrpn_status"], 1)
     p.connect(p.vars["nrpn_status"], 0, p.vars["nrpn_trig"], 0)
 
-    # After the 24th light, ask for the four left split colours, one NRPN every gap.
+    # After the 24th light, and every POLL_MS while enabled, ask for the selected split and both splits'
+    # colours, one NRPN every gap.
     p.obj(f"delay {NRPN_GAP_MS}", 980, 1420, 2, 1, varname="delay_query")
     p.connect(p.vars["sel_last"], 0, p.vars["delay_query"], 0)
     p.connect(p.vars["msg_stop"], 0, p.vars["delay_query"], 0)
+    p.obj(f"metro {POLL_MS}", 800, 1380, 2, 1, varname="poll")
+    p.obj("loadmess 1", 800, 1350, 0, 1, varname="load_poll")
+    p.obj("gate", 800, 1420, 2, 1, varname="poll_gate")
+    p.connect(p.vars["load_poll"], 0, p.vars["poll"], 0)
+    p.connect(p.vars["poll"], 0, p.vars["poll_gate"], 1)
+    p.connect(p.vars["t_enabled"], 1, p.vars["poll_gate"], 0)
+    p.connect(p.vars["poll_gate"], 0, p.vars["delay_query"], 0)
     previous = "delay_query"
-    for i, (key, number, *_rest) in enumerate(COLOR_SETTINGS):
+    for i, param in enumerate(QUERY_PARAMS):
         if i:
-            p.obj(f"delay {NRPN_GAP_MS}", 980 + i * 150, 1420, 2, 1, varname=f"delay_query_{key}")
-            p.connect(p.vars[previous], 0, p.vars[f"delay_query_{key}"], 0)
-            p.connect(p.vars["msg_stop"], 0, p.vars[f"delay_query_{key}"], 0)
-            previous = f"delay_query_{key}"
-        p.message(f"{QUERY_NRPN} {number}", 980 + i * 150, 1460, varname=f"query_{key}")
-        p.connect(p.vars[previous], 0, p.vars[f"query_{key}"], 0)
-        p.connect(p.vars[f"query_{key}"], 0, p.vars["t_nrpn"], 0)
+            p.obj(f"delay {NRPN_GAP_MS}", 980 + i * 120, 1420, 2, 1, varname=f"delay_query_{param}")
+            p.connect(p.vars[previous], 0, p.vars[f"delay_query_{param}"], 0)
+            p.connect(p.vars["msg_stop"], 0, p.vars[f"delay_query_{param}"], 0)
+            previous = f"delay_query_{param}"
+        p.message(f"{QUERY_NRPN} {param}", 980 + i * 120, 1460, varname=f"query_{param}")
+        p.connect(p.vars[previous], 0, p.vars[f"query_{param}"], 0)
+        p.connect(p.vars[f"query_{param}"], 0, p.vars["t_nrpn"], 0)
 
 
 def _assert_engine(p):
@@ -860,11 +876,11 @@ def _assert_manual(p):
 
 
 def build_reply():
-    """Pick the left split's four colours out of the LinnStrument's NRPN replies.
+    """Pick the selected split and both splits' colours out of the LinnStrument's NRPN replies.
 
     A reply is CC 99, 98, 6, 38 then CC 101 and 100 = 127. CC 38 completes it.
     CC 101 or 100 voids the stored parameter, so a later RPN's CC 6/38 is not misread.
-    Outlets are Main, Accent, Played, Low Row colour numbers.
+    Outlets follow QUERY_PARAMS: the selected split, then left and right Main, Accent, Played, Low Row.
     """
     p = Patch()
     p.box(
@@ -879,8 +895,8 @@ def build_reply():
     p.obj("expr $i2 * 128 + $i3", 24, 260, 3, 1, varname="expr_param")
     p.obj("expr $i4 * 128 + $i1", 200, 260, 4, 1, varname="expr_value")
     p.obj("pack 0 0", 24, 300, 2, 1, varname="pack_reply")
-    numbers = [number for _key, number, *_rest in COLOR_SETTINGS]
-    p.obj("route " + " ".join(str(n) for n in numbers), 24, 340, 1, len(numbers) + 1, varname="route_param")
+    p.obj("route " + " ".join(str(n) for n in QUERY_PARAMS), 24, 340, 1, len(QUERY_PARAMS) + 1,
+          varname="route_param")
     p.connect(p.vars["in_midi"], 0, p.vars["parse"], 0)
     p.connect(p.vars["parse"], 2, p.vars["route_cc"], 0)
     # pack: CC 38 is the hot left inlet, CC 99, 98 and 6 wait on the right.
@@ -898,15 +914,19 @@ def build_reply():
     p.connect(p.vars["t_nrpn"], 0, p.vars["expr_param"], 0)
     p.connect(p.vars["expr_param"], 0, p.vars["pack_reply"], 0)
     p.connect(p.vars["pack_reply"], 0, p.vars["route_param"], 0)
-    for i, (key, _number, _label, _default, lowest) in enumerate(COLOR_SETTINGS):
-        p.obj(f"split {lowest} 11", 24 + i * 120, 380, 3, 2, varname=f"valid_{key}")
+    ranges = {SPLIT_NRPN: ("split", 0, 1)}
+    for offset, side in ((0, "left"), (RIGHT_SPLIT, "right")):
+        for key, number, _label, _ld, _rd, lowest in COLOR_SETTINGS:
+            ranges[number + offset] = (f"{key}_{side}", lowest, 11)
+    for i, param in enumerate(QUERY_PARAMS):
+        name, low, high = ranges[param]
+        p.obj(f"split {low} {high}", 24 + i * 100, 380, 3, 2, varname=f"valid_{name}")
         p.box(
-            "outlet", None, nin=1, nout=0, outlettype=[], index=i + 1,
-            comment=f"{key} colour number",
-            patching_rect=[24.0 + i * 120, 420.0, 100.0, 22.0], varname=f"out_{key}",
+            "outlet", None, nin=1, nout=0, outlettype=[], index=i + 1, comment=name,
+            patching_rect=[24.0 + i * 100, 420.0, 90.0, 22.0], varname=f"out_{name}",
         )
-        p.connect(p.vars["route_param"], i, p.vars[f"valid_{key}"], 0)
-        p.connect(p.vars[f"valid_{key}"], 0, p.vars[f"out_{key}"], 0)
+        p.connect(p.vars["route_param"], i, p.vars[f"valid_{name}"], 0)
+        p.connect(p.vars[f"valid_{name}"], 0, p.vars[f"out_{name}"], 0)
     return p
 
 
@@ -967,15 +987,17 @@ def _add_note_grid(p, lights):
 
 
 def _add_color_swatches(p, top, lights, engine):
-    """Main, Accent, Played and Low Row swatch rows for the left split, on the settings screen.
+    """Main, Accent, Played and Low Row swatch rows on the settings screen.
 
-    A click sends the NRPN and repaints. A LinnStrument reply only moves the outline and repaints,
+    Each setting keeps the left and right split values and shows the one for the split selected on the
+    LinnStrument. A click sends to that split and repaints. A reply only moves the outline and repaints,
     so it does not echo back. Returns the varnames to show and hide with the screen.
     """
     swatch_w, swatch_h = SWATCH_SIZE
     lights_inlet = {"accent": 1, "main": 2}
     names = []
-    for i, (key, number, label_text, default, lowest) in enumerate(COLOR_SETTINGS):
+    split_out = QUERY_PARAMS.index(SPLIT_NRPN)
+    for i, (key, number, label_text, left_default, right_default, lowest) in enumerate(COLOR_SETTINGS):
         y = top + i * (swatch_h + 10)
         bx = 1400 + i * 300
         label_name = f"swatch_label_{key}"
@@ -987,11 +1009,25 @@ def _add_color_swatches(p, top, lights, engine):
         names.append(label_name)
 
         # Only a colour that differs from the LinnStrument's sends.
-        p.obj(f"change {default}", bx, 445, 2, 3, varname=f"changed_{key}")
+        p.obj(f"change {left_default}", bx, 445, 2, 3, varname=f"changed_{key}")
         p.obj("prepend set", bx + 60, 445, 1, 1, varname=f"known_{key}")
-        p.trigger("i i", bx, 470, varname=f"t_pick_{key}")
-        p.obj(f"prepend {number}", bx + 60, 500, 1, 1, varname=f"send_{key}")
-        p.obj(f"loadmess {default}", bx + 120, 420, 0, 1, varname=f"load_{key}")
+        p.trigger("i i i", bx, 470, varname=f"t_pick_{key}")
+        p.trigger("b i", bx + 60, 500, varname=f"t_send_{key}")
+        p.obj("int", bx + 60, 525, 2, 1, varname=f"split_int_{key}")
+        p.obj(f"expr $i1 * {RIGHT_SPLIT} + {number}", bx + 60, 550, 1, 1, varname=f"param_{key}")
+        p.obj("pack 0 0", bx + 60, 575, 2, 1, varname=f"send_{key}")
+        p.trigger("i i i", bx + 200, 400, varname=f"t_split_{key}")
+        p.obj("+ 1", bx + 200, 425, 2, 1, varname=f"store_ctl_{key}")
+        p.obj("gate 2 1", bx + 200, 450, 2, 2, varname=f"store_{key}")
+        p.trigger("b i", bx + 120, 380, varname=f"t_left_{key}")
+        p.trigger("b i", bx + 170, 380, varname=f"t_right_{key}")
+        p.obj(f"loadmess {left_default}", bx + 120, 350, 0, 1, varname=f"load_left_{key}")
+        p.obj(f"loadmess {right_default}", bx + 170, 350, 0, 1, varname=f"load_right_{key}")
+        # $i1 is the selected split: 0 shows the left value, 1 the right.
+        p.obj("expr $i1 * $i3 + (1 - $i1) * $i2", bx + 120, 420, 3, 1, varname=f"selected_{key}")
+        # Polling repeats the same answers, so only a different colour repaints. Starting at 0 also drops
+        # the 0 the expression gives if the right default loads before the left one.
+        p.obj("change 0", bx + 120, 445, 2, 3, varname=f"heard_change_{key}")
         p.trigger("i i", bx + 120, 470, varname=f"t_heard_{key}")
         p.trigger("i i", bx, 560, varname=f"apply_{key}")
         p.trigger("i b", bx, 600, varname=f"t_mark_{key}")
@@ -999,11 +1035,32 @@ def _add_color_swatches(p, top, lights, engine):
         numbers = [n for n in RAINBOW_ORDER if n >= lowest]
         p.obj("sel " + " ".join(str(n) for n in numbers), bx, 660, 2, len(numbers) + 1, varname=f"sel_mark_{key}")
         p.connect(p.vars[f"changed_{key}"], 0, p.vars[f"t_pick_{key}"], 0)
-        p.connect(p.vars[f"t_pick_{key}"], 1, p.vars[f"send_{key}"], 0)
+        # A click: remember it for the selected split, send it there, then repaint.
+        p.connect(p.vars[f"t_pick_{key}"], 2, p.vars[f"store_{key}"], 1)
+        p.connect(p.vars[f"store_{key}"], 0, p.vars[f"selected_{key}"], 1)
+        p.connect(p.vars[f"store_{key}"], 1, p.vars[f"selected_{key}"], 2)
+        p.connect(p.vars[f"t_pick_{key}"], 1, p.vars[f"t_send_{key}"], 0)
+        p.connect(p.vars[f"t_send_{key}"], 1, p.vars[f"send_{key}"], 1)
+        p.connect(p.vars[f"t_send_{key}"], 0, p.vars[f"split_int_{key}"], 0)
+        p.connect(p.vars[f"split_int_{key}"], 0, p.vars[f"param_{key}"], 0)
+        p.connect(p.vars[f"param_{key}"], 0, p.vars[f"send_{key}"], 0)
         p.connect(p.vars[f"send_{key}"], 0, engine, 8)
         p.connect(p.vars[f"t_pick_{key}"], 0, p.vars[f"apply_{key}"], 0)
-        p.connect(p.vars["reply"], i, p.vars[f"t_heard_{key}"], 0)
-        p.connect(p.vars[f"load_{key}"], 0, p.vars[f"t_heard_{key}"], 0)
+        # Replies: store each split's value, then show the selected split's.
+        p.connect(p.vars["reply"], split_out, p.vars[f"t_split_{key}"], 0)
+        p.connect(p.vars[f"t_split_{key}"], 2, p.vars[f"split_int_{key}"], 1)
+        p.connect(p.vars[f"t_split_{key}"], 1, p.vars[f"store_ctl_{key}"], 0)
+        p.connect(p.vars[f"store_ctl_{key}"], 0, p.vars[f"store_{key}"], 0)
+        p.connect(p.vars[f"t_split_{key}"], 0, p.vars[f"selected_{key}"], 0)
+        p.connect(p.vars["reply"], QUERY_PARAMS.index(number), p.vars[f"t_left_{key}"], 0)
+        p.connect(p.vars["reply"], QUERY_PARAMS.index(number + RIGHT_SPLIT), p.vars[f"t_right_{key}"], 0)
+        p.connect(p.vars[f"load_left_{key}"], 0, p.vars[f"t_left_{key}"], 0)
+        p.connect(p.vars[f"load_right_{key}"], 0, p.vars[f"t_right_{key}"], 0)
+        for side, inlet in (("left", 1), ("right", 2)):
+            p.connect(p.vars[f"t_{side}_{key}"], 1, p.vars[f"selected_{key}"], inlet)
+            p.connect(p.vars[f"t_{side}_{key}"], 0, p.vars[f"selected_{key}"], 0)
+        p.connect(p.vars[f"selected_{key}"], 0, p.vars[f"heard_change_{key}"], 0)
+        p.connect(p.vars[f"heard_change_{key}"], 0, p.vars[f"t_heard_{key}"], 0)
         p.connect(p.vars[f"t_heard_{key}"], 1, p.vars[f"known_{key}"], 0)
         p.connect(p.vars[f"known_{key}"], 0, p.vars[f"changed_{key}"], 0)
         p.connect(p.vars[f"t_heard_{key}"], 0, p.vars[f"apply_{key}"], 0)
@@ -1366,7 +1423,7 @@ def build_parent(engine_patcher):
     p.connect(engine, 1, manual, 0)
     p.connect(manual, 0, engine, 7)
     reply = p.box(
-        "newobj", "p reply", nin=1, nout=len(COLOR_SETTINGS), varname="reply",
+        "newobj", "p reply", nin=1, nout=len(QUERY_PARAMS), varname="reply",
         patching_rect=[280.0, 560.0, 56.0, 22.0],
         patcher=build_reply().as_dict([40.0, 40.0, 700.0, 480.0], presentation=False),
     )

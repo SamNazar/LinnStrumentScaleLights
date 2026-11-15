@@ -27,6 +27,7 @@ from build_device import (
     MAIN_TEXT,
     MAIN_TEXT_INACTIVE,
     NOTE_NAMES,
+    QUERY_PARAMS,
     RAINBOW_ORDER,
     amxd_bytes,
     build_document,
@@ -346,12 +347,14 @@ class PatcherTest(unittest.TestCase):
         cords = links(self.engine)
         self.assertIn(([eng["sel_last"]["id"], 0], [eng["delay_query"]["id"], 0]), cords)
         self.assertIn(([eng["msg_stop"]["id"], 0], [eng["delay_query"]["id"], 0]), cords)
-        self.assertEqual(
-            [eng[f"query_{key}"]["text"] for key, *_rest in COLOR_SETTINGS],
-            ["299 30", "299 31", "299 32", "299 33"],
-        )
-        for key, *_rest in COLOR_SETTINGS:
-            self.assertIn(([eng[f"query_{key}"]["id"], 0], [eng["t_nrpn"]["id"], 0]), cords)
+        self.assertEqual(QUERY_PARAMS, (201, 30, 31, 32, 33, 130, 131, 132, 133))
+        for param in QUERY_PARAMS:
+            self.assertEqual(eng[f"query_{param}"]["text"], f"299 {param}")
+            self.assertIn(([eng[f"query_{param}"]["id"], 0], [eng["t_nrpn"]["id"], 0]), cords)
+        self.assertEqual(eng["poll"]["text"], "metro 2000")
+        self.assertIn(([eng["poll"]["id"], 0], [eng["poll_gate"]["id"], 1]), cords)
+        self.assertIn(([eng["t_enabled"]["id"], 1], [eng["poll_gate"]["id"], 0]), cords)
+        self.assertIn(([eng["poll_gate"]["id"], 0], [eng["delay_query"]["id"], 0]), cords)
 
     def test_nrpn_encoder_is_spec_order(self):
         eng = by_var(self.engine)
@@ -372,9 +375,11 @@ class PatcherTest(unittest.TestCase):
         reply = by_var(reply_patch)
         cords = links(reply_patch)
         self.assertEqual(reply["route_cc"]["text"], "route 99 98 6 38 101 100")
-        self.assertEqual(reply["route_param"]["text"], "route 30 31 32 33")
-        self.assertEqual(reply["valid_played"]["text"], "split 0 11")
-        self.assertEqual(reply["valid_main"]["text"], "split 1 11")
+        self.assertEqual(reply["route_param"]["text"], "route 201 30 31 32 33 130 131 132 133")
+        self.assertEqual(reply["valid_split"]["text"], "split 0 1")
+        self.assertEqual(reply["valid_played_left"]["text"], "split 0 11")
+        self.assertEqual(reply["valid_played_right"]["text"], "split 0 11")
+        self.assertEqual(reply["valid_main_right"]["text"], "split 1 11")
         self.assertIn(([reply["route_cc"]["id"], 3], [reply["pack_nrpn"]["id"], 0]), cords)
         self.assertIn(([reply["void_param"]["id"], 0], [reply["pack_nrpn"]["id"], 1]), cords)
 
@@ -382,7 +387,7 @@ class PatcherTest(unittest.TestCase):
         parent = by_var(self.patcher)
         cords = links(self.patcher)
         engine = parent["engine"]["id"]
-        for i, (key, number, label, default, lowest) in enumerate(COLOR_SETTINGS):
+        for key, number, label, default, right_default, lowest in COLOR_SETTINGS:
             row = sorted(
                 (box for box in boxes(self.patcher)
                  if box["maxclass"] == "panel" and box.get("varname", "").startswith(f"swatch_{key}_")),
@@ -401,9 +406,18 @@ class PatcherTest(unittest.TestCase):
                 self.assertIn(([pick["id"], 0], [parent[f"changed_{key}"]["id"], 0]), cords)
             self.assertEqual(parent[f"changed_{key}"]["text"], f"change {default}")
             self.assertIn(([parent[f"known_{key}"]["id"], 0], [parent[f"changed_{key}"]["id"], 0]), cords)
-            self.assertEqual(parent[f"send_{key}"]["text"], f"prepend {number}")
+            self.assertEqual(parent[f"param_{key}"]["text"], f"expr $i1 * 100 + {number}")
+            self.assertIn(([parent[f"param_{key}"]["id"], 0], [parent[f"send_{key}"]["id"], 0]), cords)
             self.assertIn(([parent[f"send_{key}"]["id"], 0], [engine, 8]), cords)
-            self.assertIn(([parent["reply"]["id"], i], [parent[f"t_heard_{key}"]["id"], 0]), cords)
+            reply = parent["reply"]["id"]
+            self.assertIn(([reply, 0], [parent[f"t_split_{key}"]["id"], 0]), cords)
+            self.assertIn(([reply, QUERY_PARAMS.index(number)], [parent[f"t_left_{key}"]["id"], 0]), cords)
+            self.assertIn(([reply, QUERY_PARAMS.index(number + 100)], [parent[f"t_right_{key}"]["id"], 0]), cords)
+            self.assertEqual(parent[f"selected_{key}"]["text"], "expr $i1 * $i3 + (1 - $i1) * $i2")
+            self.assertEqual(parent[f"load_left_{key}"]["text"], f"loadmess {default}")
+            self.assertEqual(parent[f"load_right_{key}"]["text"], f"loadmess {right_default}")
+            self.assertIn(([parent[f"selected_{key}"]["id"], 0], [parent[f"heard_change_{key}"]["id"], 0]), cords)
+            self.assertIn(([parent[f"heard_change_{key}"]["id"], 0], [parent[f"t_heard_{key}"]["id"], 0]), cords)
             heard_targets = {dst[0] for src, dst in cords if src[0] == parent[f"t_heard_{key}"]["id"]}
             self.assertNotIn(parent[f"send_{key}"]["id"], heard_targets)
         self.assertIn(([parent["apply_accent"]["id"], 0], [parent["lights"]["id"], 1]), cords)
