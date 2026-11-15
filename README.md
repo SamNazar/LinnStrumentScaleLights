@@ -6,7 +6,7 @@ It watches the current scale chooser (`live_set` `scale_mode`, `root_note`, `sca
 
 Pitch class is `(root_note + interval) mod 12`, using `scale_intervals` only. `scale_name` is shown on the device and is not used for the math.
 
-The panel is 169 pixels tall, the fixed height of a Live device. It shows the same 12 pitch classes as the LinnStrument global settings page: three columns, four rows, bottom row C C# D and top row A A# B. Unlit notes are dark. Scale notes use Live's device-on yellow with black text. The root is cyan, also with black text. The scale button is Ableton's `scale.svg` glyph.
+It shows the same 12 pitch classes as the LinnStrument global settings page: three columns x four rows. Unlit notes are dark.
 
 - Follow Scale on, and Live has a scale selected: the grid and the root menu follow that scale. The note buttons are not editable.
 - Follow Scale on, but Live has no scale selected: the button is greyed out and the notes can be edited.
