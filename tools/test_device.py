@@ -10,21 +10,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from build_device import (
-    CYAN_ON,
-    CYAN_ON_INACTIVE,
+    ACCENT_ON,
+    ACCENT_ON_INACTIVE,
+    ACCENT_TEXT,
+    ACCENT_TEXT_INACTIVE,
+    COLOR_SETTINGS,
     DARK_BG,
     DARK_BG_INACTIVE,
+    DEFAULT_MAIN,
     DEVICE_HEIGHT,
     DIM_TEXT,
     DIM_TEXT_INACTIVE,
-    INK_TEXT,
-    INK_TEXT_INACTIVE,
+    LINN_COLORS,
+    MAIN_ON,
+    MAIN_ON_INACTIVE,
+    MAIN_TEXT,
+    MAIN_TEXT_INACTIVE,
     NOTE_NAMES,
-    YELLOW_ON,
-    YELLOW_ON_INACTIVE,
+    RAINBOW_ORDER,
     amxd_bytes,
     build_document,
     dumps,
+    text_for,
 )
 from scale_logic import full_update, masks, nrpn_messages, parameter_number
 
@@ -136,7 +143,7 @@ class PatcherTest(unittest.TestCase):
 
     def test_every_cord_lands_on_a_real_inlet(self):
         parent = by_var(self.patcher)
-        for name in ("engine", "lights", "manual"):
+        for name in ("engine", "lights", "manual", "reply"):
             sub = parent[name]["patcher"]
             inlets = [b["index"] for b in boxes(sub) if b["maxclass"] == "inlet"]
             outlets = [b["index"] for b in boxes(sub) if b["maxclass"] == "outlet"]
@@ -147,6 +154,7 @@ class PatcherTest(unittest.TestCase):
             self.engine,
             parent["lights"]["patcher"],
             parent["manual"]["patcher"],
+            parent["reply"]["patcher"],
         ):
             io = {box["id"]: box for box in boxes(patcher)}
             for src, dst in links(patcher):
@@ -160,8 +168,14 @@ class PatcherTest(unittest.TestCase):
         self.assertIn("midiin", names)
         self.assertIn("midiout", names)
         self.assertFalse(any("plugin~" in text or "plugout~" in text for text in names))
-        midiin = by_var(self.patcher)["midi_in"]["id"]
-        self.assertFalse(any(src[0] == midiin for src, _dst in links(self.patcher)))
+        parent = by_var(self.patcher)
+        midiin = parent["midi_in"]["id"]
+        self.assertEqual(
+            [dst[0] for src, dst in links(self.patcher) if src[0] == midiin],
+            [parent["reply"]["id"]],
+        )
+        midiout_sources = {src[0] for src, dst in links(self.patcher) if dst[0] == parent["midi_out"]["id"]}
+        self.assertEqual(midiout_sources, {parent["engine"]["id"]})
 
     def test_observers_use_the_spec_paths(self):
         texts = [box.get("text", "") for box in boxes(self.patcher)]
@@ -279,20 +293,18 @@ class PatcherTest(unittest.TestCase):
     def test_no_empty_parameter_banks(self):
         self.assertNotIn("parameters", self.patcher)
 
-    def test_parameters_are_channel_follow_and_root(self):
+    def test_parameters_are_channel_and_follow(self):
         visible = {
             box.get("varname")
             for box in boxes(self.patcher)
             if box.get("parameter_enable") == 1
             and box.get("saved_attribute_attributes", {}).get("valueof", {}).get("parameter_invisible") != 2
         }
-        self.assertEqual(visible, {"midi_channel", "scale_mark", "root_menu"})
+        self.assertEqual(visible, {"midi_channel", "scale_mark"})
         follow = by_var(self.patcher)["scale_mark"]["saved_attribute_attributes"]["valueof"]
-        root = by_var(self.patcher)["root_menu"]["saved_attribute_attributes"]["valueof"]
         self.assertEqual(follow["parameter_longname"], "Follow Scale")
         self.assertEqual(follow["parameter_initial"], [1])
-        self.assertEqual(root["parameter_longname"], "Root")
-        self.assertEqual(root["parameter_enum"], list(NOTE_NAMES))
+        self.assertNotIn("root_menu", by_var(self.patcher))
 
     def test_scale_button_follows_and_greys_out_without_a_scale(self):
         parent = by_var(self.patcher)
@@ -329,6 +341,118 @@ class PatcherTest(unittest.TestCase):
         self.assertIn(([parent["sel_follow"]["id"], 1], [parent["grey_reset"]["id"], 0]), cords)
         self.assertIn(([parent["sel_follow"]["id"], 0], [parent["arm_reset"]["id"], 0]), cords)
 
+    def test_colour_queries_follow_the_last_light(self):
+        eng = by_var(self.engine)
+        cords = links(self.engine)
+        self.assertIn(([eng["sel_last"]["id"], 0], [eng["delay_query"]["id"], 0]), cords)
+        self.assertIn(([eng["msg_stop"]["id"], 0], [eng["delay_query"]["id"], 0]), cords)
+        self.assertEqual(
+            [eng[f"query_{key}"]["text"] for key, *_rest in COLOR_SETTINGS],
+            ["299 30", "299 31", "299 32", "299 33"],
+        )
+        for key, *_rest in COLOR_SETTINGS:
+            self.assertIn(([eng[f"query_{key}"]["id"], 0], [eng["t_nrpn"]["id"], 0]), cords)
+
+    def test_nrpn_encoder_is_spec_order(self):
+        eng = by_var(self.engine)
+        cords = links(self.engine)
+        trig = eng["nrpn_trig"]["id"]
+        by_outlet = {src[1]: dst[0] for src, dst in cords if src[0] == trig}
+        names = {box["id"]: box.get("varname") for box in boxes(self.engine)}
+        self.assertEqual(
+            [names[by_outlet[i]] for i in range(5, -1, -1)],
+            ["nrpn99", "nrpn98", "nrpn6", "nrpn38", "nrpn101", "nrpn100"],
+        )
+        self.assertEqual(eng["nrpn99_byte"]["text"], "/ 128")
+        self.assertEqual(eng["nrpn98_byte"]["text"], "% 128")
+        self.assertIn(([eng["in_8"]["id"], 0], [eng["t_nrpn"]["id"], 0]), cords)
+
+    def test_reply_parser_routes_the_four_colours(self):
+        reply_patch = by_var(self.patcher)["reply"]["patcher"]
+        reply = by_var(reply_patch)
+        cords = links(reply_patch)
+        self.assertEqual(reply["route_cc"]["text"], "route 99 98 6 38 101 100")
+        self.assertEqual(reply["route_param"]["text"], "route 30 31 32 33")
+        self.assertEqual(reply["valid_played"]["text"], "split 0 11")
+        self.assertEqual(reply["valid_main"]["text"], "split 1 11")
+        self.assertIn(([reply["route_cc"]["id"], 3], [reply["pack_nrpn"]["id"], 0]), cords)
+        self.assertIn(([reply["void_param"]["id"], 0], [reply["pack_nrpn"]["id"], 1]), cords)
+
+    def test_colour_swatches_send_and_replies_only_mark(self):
+        parent = by_var(self.patcher)
+        cords = links(self.patcher)
+        engine = parent["engine"]["id"]
+        for i, (key, number, label, default, lowest) in enumerate(COLOR_SETTINGS):
+            row = sorted(
+                (box for box in boxes(self.patcher)
+                 if box["maxclass"] == "panel" and box.get("varname", "").startswith(f"swatch_{key}_")),
+                key=lambda box: box["presentation_rect"][0],
+            )
+            colours = [int(box["varname"].rsplit("_", 1)[1]) for box in row]
+            self.assertEqual(colours, [n for n in RAINBOW_ORDER if n >= lowest])
+            self.assertEqual(len({box["presentation_rect"][1] for box in row}), 1)
+            for colour, box in zip(colours, row):
+                fill = LINN_COLORS[colour][1]
+                self.assertEqual(box["bgfillcolor"], [*fill, 1.0])
+                self.assertEqual(box["bordercolor"], [*text_for(fill), 1.0])
+                pick = parent[f"swatch_pick_{key}_{colour}"]
+                self.assertEqual(pick["text"], str(colour))
+                self.assertIn(([parent[f"swatch_button_{key}_{colour}"]["id"], 0], [pick["id"], 0]), cords)
+                self.assertIn(([pick["id"], 0], [parent[f"changed_{key}"]["id"], 0]), cords)
+            self.assertEqual(parent[f"changed_{key}"]["text"], f"change {default}")
+            self.assertIn(([parent[f"known_{key}"]["id"], 0], [parent[f"changed_{key}"]["id"], 0]), cords)
+            self.assertEqual(parent[f"send_{key}"]["text"], f"prepend {number}")
+            self.assertIn(([parent[f"send_{key}"]["id"], 0], [engine, 8]), cords)
+            self.assertIn(([parent["reply"]["id"], i], [parent[f"t_heard_{key}"]["id"], 0]), cords)
+            heard_targets = {dst[0] for src, dst in cords if src[0] == parent[f"t_heard_{key}"]["id"]}
+            self.assertNotIn(parent[f"send_{key}"]["id"], heard_targets)
+        self.assertIn(([parent["apply_accent"]["id"], 0], [parent["lights"]["id"], 1]), cords)
+        self.assertIn(([parent["apply_main"]["id"], 0], [parent["lights"]["id"], 2]), cords)
+
+    def test_gear_swaps_the_main_and_settings_screens(self):
+        parent = by_var(self.patcher)
+        gear = parent["gear"]
+        self.assertEqual(gear["pictures"], ["gear.svg", "gear.svg"])
+        self.assertEqual(gear["saved_attribute_attributes"]["valueof"]["parameter_invisible"], 2)
+        widest = max(box["presentation_rect"][0] + box["presentation_rect"][2]
+                     for box in boxes(self.patcher) if box.get("presentation"))
+        self.assertEqual(gear["presentation_rect"][0] + gear["presentation_rect"][2], widest)
+        self.assertEqual(gear["presentation_rect"][1], 6)
+        settings = {box["varname"] for box in boxes(self.patcher)
+                    if box.get("presentation") and box.get("hidden") == 1}
+        self.assertIn("midi_channel", settings)
+        self.assertTrue(all(not parent[f"pad_{pc}"].get("hidden") for pc in range(12)))
+        show_settings = parent["show_settings"]["text"].split(", ")
+        show_main = parent["show_main"]["text"].split(", ")
+        for name in settings:
+            self.assertIn(f"script show {name}", show_settings)
+            self.assertIn(f"script hide {name}", show_main)
+        for pc in range(12):
+            self.assertIn(f"script hide pad_{pc}", show_settings)
+            self.assertIn(f"script show pad_{pc}", show_main)
+        cords = links(self.patcher)
+        self.assertIn(([parent["sel_screen"]["id"], 1], [parent["show_settings"]["id"], 0]), cords)
+        self.assertIn(([parent["show_settings"]["id"], 0], [parent["screen_patcher"]["id"], 0]), cords)
+
+    def test_text_is_readable_on_every_colour(self):
+        def luminance(rgb):
+            r, g, b = rgb
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        for _name, fill in LINN_COLORS.values():
+            self.assertGreaterEqual(abs(luminance(fill) - luminance(text_for(fill))), 0.5)
+
+    def test_shift_click_sets_the_root_in_manual_mode(self):
+        parent = by_var(self.patcher)
+        manual = parent["manual"]["id"]
+        cords = links(self.patcher)
+        self.assertEqual(parent["click_gate"]["text"], "gate 2")
+        self.assertIn(([parent["modifiers"]["id"], 0], [parent["shift_choice"]["id"], 0]), cords)
+        self.assertIn(([parent["click_gate"]["id"], 0], [manual, 2]), cords)
+        self.assertIn(([parent["t_shift_root"]["id"], 1], [manual, 4]), cords)
+        self.assertIn(([parent["t_shift_root"]["id"], 0], [manual, 1]), cords)
+        for pc in range(12):
+            self.assertIn(([parent[f"click_{pc}"]["id"], 0], [parent["t_click"]["id"], 0]), cords)
+
     def test_presentation_fits_the_live_device_height(self):
         for box in boxes(self.patcher):
             if not box.get("presentation"):
@@ -351,7 +475,7 @@ class PatcherTest(unittest.TestCase):
             self.assertEqual(pad["saved_attribute_attributes"]["valueof"]["parameter_invisible"], 2)
             self.assertEqual(pad["mode"], 1)
             self.assertEqual(pad["appearance"], 0)
-            self.assertEqual(pad["activetextoncolor"], [0.0, 0.0, 0.0, 1.0])
+            self.assertEqual(pad["activetextoncolor"], [*text_for(DEFAULT_MAIN), 1.0])
             self.assertNotIn("hint", pad)
             x, y, _w, _h = pad["presentation_rect"]
             rows.setdefault(y, []).append((x, pc))
@@ -392,16 +516,16 @@ class PatcherTest(unittest.TestCase):
             self.assertEqual(light_vars[f"state_{pc}"]["text"], "expr $i2 * 2 + $i1")
             self.assertEqual(light_vars[f"bg_0_{pc}"]["text"], DARK_BG)
             self.assertEqual(light_vars[f"bgi_0_{pc}"]["text"], DARK_BG_INACTIVE)
-            self.assertEqual(light_vars[f"bg_1_{pc}"]["text"], YELLOW_ON)
-            self.assertEqual(light_vars[f"bgi_1_{pc}"]["text"], YELLOW_ON_INACTIVE)
-            self.assertEqual(light_vars[f"bg_2_{pc}"]["text"], CYAN_ON)
-            self.assertEqual(light_vars[f"bgi_2_{pc}"]["text"], CYAN_ON_INACTIVE)
+            self.assertEqual(light_vars[f"bg_1_{pc}"]["text"], MAIN_ON)
+            self.assertEqual(light_vars[f"bgi_1_{pc}"]["text"], MAIN_ON_INACTIVE)
+            self.assertEqual(light_vars[f"bg_2_{pc}"]["text"], ACCENT_ON)
+            self.assertEqual(light_vars[f"bgi_2_{pc}"]["text"], ACCENT_ON_INACTIVE)
             self.assertEqual(light_vars[f"fg_0_{pc}"]["text"], DIM_TEXT)
             self.assertEqual(light_vars[f"fgi_0_{pc}"]["text"], DIM_TEXT_INACTIVE)
-            self.assertEqual(light_vars[f"fg_1_{pc}"]["text"], INK_TEXT)
-            self.assertEqual(light_vars[f"fgi_1_{pc}"]["text"], INK_TEXT_INACTIVE)
-            self.assertEqual(light_vars[f"fg_2_{pc}"]["text"], INK_TEXT)
-            self.assertEqual(light_vars[f"fgi_2_{pc}"]["text"], INK_TEXT_INACTIVE)
+            self.assertEqual(light_vars[f"fg_1_{pc}"]["text"], MAIN_TEXT)
+            self.assertEqual(light_vars[f"fgi_1_{pc}"]["text"], MAIN_TEXT_INACTIVE)
+            self.assertEqual(light_vars[f"fg_2_{pc}"]["text"], ACCENT_TEXT)
+            self.assertEqual(light_vars[f"fgi_2_{pc}"]["text"], ACCENT_TEXT_INACTIVE)
             self.assertEqual(light_vars[f"val_0_{pc}"]["text"], "set 0")
             self.assertEqual(light_vars[f"val_1_{pc}"]["text"], "set 1")
             self.assertEqual(light_vars[f"val_2_{pc}"]["text"], "set 1")

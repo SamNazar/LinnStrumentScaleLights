@@ -4,21 +4,21 @@ Max for Live MIDI effect that lights a LinnStrument from the scale of the clip s
 
 It watches the current scale chooser (`live_set` `scale_mode`, `root_note`, `scale_name`, `scale_intervals`) and the clip shown in Detail View (`live_set view` `detail_clip`). When any of those change, or when the selected clip changes even if the scale values do not, it sends a full set of LinnStrument Main and Accent pitch-class NRPNs.
 
-Pitch class is `(root_note + interval) mod 12`, using `scale_intervals` only. `scale_name` is shown on the device and is not used for the math.
+Pitch class is `(root_note + interval) mod 12`, using `scale_intervals` only. `scale_name` is not used for the math.
 
 It shows the same 12 pitch classes as the LinnStrument global settings page: three columns x four rows. Unlit notes are dark.
 
-- Follow Scale on, and Live has a scale selected: the grid and the root menu follow that scale. The note buttons are not editable.
+- Follow Scale on, and Live has a scale selected: the grid follows that scale. The note buttons are not editable.
 - Follow Scale on, but Live has no scale selected: the button is greyed out and the notes can be edited.
-- Follow Scale off: click a note to turn its light on or off, and choose which lit note is cyan with the Root menu.
+- Follow Scale off: click a note to turn its light on or off. Shift-click a note to make it the root; it lights if it was dark. Reset goes back to C major.
 
-While following a scale, Scale Mode on lights the root as Accent and the other scale degrees as Main. Scale Mode off is not a selected scale, so the device does not force every Main light on. A manual pattern sends the same NRPN rules: the cyan note is Accent, every other lit note is Main, and dark notes are off.
+While following a scale, Scale Mode on lights the root as Accent and the other scale degrees as Main. Scale Mode off is not a selected scale, so the device does not force every Main light on. A manual pattern sends the same NRPN rules: the root is Accent, every other lit note is Main, and dark notes are off.
 
 Main is NRPN 203–214 for C through B. Accent is NRPN 215–226 for C through B. Each NRPN is CC 99 = 1, CC 98 = parameter − 128, CC 6 = 0, CC 38 = 0 or 1, then the reset CC 101 = 127 and CC 100 = 127. The device sends all 24, with 5 ms between them. It does not change Live’s scale, does not enable User Firmware mode, and does not store or clear custom light memories.
 
 The surface has to already be on a pitch-class note-lights preset (the panel memories C through G#). Custom memories A, A#, and B ignore these NRPNs, so the pads will not follow the clip while one of those is selected. This device does not switch presets.
 
-Colors are whatever Main and Accent are already set to on the split. The device does not send color NRPNs.
+The gear at the top right opens the settings screen in place of the grid: the MIDI channel, and swatch rows for the LinnStrument's left split Main, Accent, Played and Low Row colors (NRPN 30 to 33), in rainbow order with white, black and off last. The current color is outlined. Clicking a swatch sends that NRPN and repaints the grid: lit notes use Main and the root uses Accent, with black or white text chosen for readability. After each light update the device asks for all four colors (NRPN 299) and moves the outlines to match. The answer only reaches the device if this track's MIDI From is the LinnStrument and Monitor is In. Without it the swatches start at the firmware defaults (green, cyan, red, yellow) and nothing is sent until you click one.
 
 ## Open it in Max
 
